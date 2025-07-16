@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% block title %}Livestream | Solarboard Dashboard{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Live Inspection Feed</h1>
+
+<div class="row">
+  <div class="col-md-6">
+    <h4>Conveyor Belt Camera</h4>
+    <img src="{{ url_for('video_feed') }}" class="img-fluid border" alt="Livestream">
+  </div>
+</div>
+
+<hr>
+
+<h3 class="mt-4">Automation Controls</h3>
+<form method="POST" action="{{ url_for('send_mqtt') }}">
+  <div class="btn-group" role="group" aria-label="Control Buttons">
+    <button name="action" value="start" class="btn btn-success">Start</button>
+    <button name="action" value="stop" class="btn btn-danger">Stop</button>
+    <button name="action" value="initialize" class="btn btn-warning">Initialize</button>
+    <button name="action" value="save_location" class="btn btn-info">Save Location</button>
+  </div>
+</form>
+<hr>
+
+<h4>Real-Time Servo Control (5 DOF)</h4>
+<div>
+  <label for="motor1">Motor 1</label><br>
+  <input type="range" id="motor1" min="0" max="180" value="95"
+         oninput="updateMotor(1, this.value)" style="width: 80%;">
+  <span id="val1">95</span><br><br>
+
+  <label for="motor2">Motor 2</label><br>
+  <input type="range" id="motor2" min="0" max="180" value="80"
+         oninput="updateMotor(2, this.value)" style="width: 80%;">
+  <span id="val2">80</span><br><br>
+
+  <label for="motor3">Motor 3</label><br>
+  <input type="range" id="motor3" min="0" max="180" value="57"
+         oninput="updateMotor(3, this.value)" style="width: 80%;">
+  <span id="val3">57</span><br><br>
+
+  <label for="motor4">Motor 4</label><br>
+  <input type="range" id="motor4" min="0" max="180" value="90"
+         oninput="updateMotor(4, this.value)" style="width: 80%;">
+  <span id="val4">90</span><br><br>
+
+  <label for="motor5">Motor 5</label><br>
+  <input type="range" id="motor5" min="0" max="180" value="180"
+         oninput="updateMotor(5, this.value)" style="width: 80%;">
+  <span id="val5">180</span><br><br>
+</div>
+
+<script>
+  function updateMotor(motor, angle) {
+    document.getElementById('val' + motor).innerText = angle;
+
+    fetch("/update_motor", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        motor: motor,
+        action: "absolute",
+        angle: parseInt(angle)
+      })
+    }).then(res => {
+      if (!res.ok) {
+        console.error("Failed to send update");
+      }
+    });
+  }
+</script>
+
+
+
+{% endblock %}

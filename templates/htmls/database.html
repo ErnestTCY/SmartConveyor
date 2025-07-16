@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}Database | T4G Dashboard{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <h1 class="mb-4">📊 Product Database</h1>
+    
+    {% if products %}
+    <div class="row">
+        {% for product in products %}
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">{{ product.serial_number }}</h5>
+                    <h6 class="card-subtitle mb-2 text-muted">{{ product.model_name }}</h6>
+                    
+                    <div class="mb-3">
+                        <span class="badge {% if product.status == 'cracked' %}bg-danger{% elif product.status == 'good' %}bg-success{% else %}bg-warning{% endif %}">
+                            {{ product.status }}
+                        </span>
+                    </div>
+                    
+                    {% if product.latest_images %}
+                    <div class="mb-3">
+                        <small class="text-muted">
+                            <i class="fas fa-images"></i> {{ product.latest_images|length }} latest image(s)
+                        </small>
+                        <div class="mt-2">
+                            <img src="{{ url_for('static', filename=product.latest_images[0]) }}" 
+                                 alt="Latest Product Image" 
+                                 class="img-fluid rounded" 
+                                 style="max-height: 120px; object-fit: contain;">
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="mb-3">
+                        <small class="text-muted">
+                            <i class="fas fa-exclamation-triangle"></i> No images available
+                        </small>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="mb-2">
+                        <small class="text-muted">
+                            <i class="fas fa-clock"></i> {{ product.timestamp }}
+                        </small>
+                    </div>
+                    
+                    <a href="/product/{{ product.serial_number }}" class="btn btn-primary btn-sm">
+                        <i class="fas fa-eye"></i> View Details
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <i class="fas fa-info-circle"></i> No products found in the database.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

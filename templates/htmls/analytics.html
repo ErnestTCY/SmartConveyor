@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Analytics | T4G Dashboard{% endblock %}
+{% block content %}
+<h1>Analytics</h1>
+<p>Welcome to the analytics dashboard. Add your analytics content here.</p>
+
+<div class="row my-4">
+  <div class="col-md-6">
+    <h5>Inspection Accuracy</h5>
+    <canvas id="accuracyGauge"></canvas>
+  </div>
+  <div class="col-md-6">
+    <h5>Temperature Trends</h5>
+    <canvas id="tempChart"></canvas>
+  </div>
+</div>
+
+<script>
+  // Sample Gauge (using Doughnut to simulate)
+  new Chart(document.getElementById('accuracyGauge'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Accuracy', 'Remaining'],
+      datasets: [{
+        data: [90, 10],
+        backgroundColor: ['#28a745', '#dee2e6']
+      }]
+    },
+    options: { cutout: '80%' }
+  });
+
+  // Sample Line Chart
+  new Chart(document.getElementById('tempChart'), {
+    type: 'line',
+    data: {
+      labels: ['10:00', '10:05', '10:10', '10:15'],
+      datasets: [{
+        label: 'Avg Temperature (°C)',
+        data: [35, 36, 34, 37],
+        fill: false,
+        borderColor: 'blue'
+      }]
+    }
+  });
+</script>
+{% endblock %}

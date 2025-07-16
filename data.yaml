@@ -1,0 +1,12 @@
+train: C:/Users/User/Desktop/hanging/Competition/T4G 022025/Deploy2/train/images
+val: C:/Users/User/Desktop/hanging/Competition/T4G 022025/Deploy2/val/images
+
+nc: 2
+names: ['crack', 'solarboard']
+
+roboflow:
+  workspace: objdetections
+  project: solarboard
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/objdetections/solarboard/dataset/1

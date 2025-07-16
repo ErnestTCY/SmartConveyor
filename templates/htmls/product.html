@@ -1,0 +1,218 @@
+{% extends 'base.html' %}
+{% block title %}Product Detail | T4G Dashboard{% endblock %}
+{% block content %}
+
+<div class="container py-4">
+    <h2 class="mb-4">🔍 Product Details</h2>
+
+    {% if product %}
+    <div class="row">
+        <!-- Image Section -->
+        <div class="col-md-5 mb-4">
+            <h5>📸 Latest Images</h5>
+            {% if product.images %}
+                <div id="imageCarousel" class="carousel slide mb-3" data-bs-ride="carousel">
+                    <div class="carousel-inner">
+                        {% for image in product.images %}
+                        <div class="carousel-item {% if loop.first %}active{% endif %}">
+                            <img src="{{ url_for('static', filename=image) }}" alt="Product Image"
+                                class="d-block w-100 rounded border" style="max-height: 300px; object-fit: contain;">
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% if product.images|length > 1 %}
+                    <button class="carousel-control-prev" type="button" data-bs-target="#imageCarousel" data-bs-slide="prev">
+                        <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                        <span class="visually-hidden">Previous</span>
+                    </button>
+                    <button class="carousel-control-next" type="button" data-bs-target="#imageCarousel" data-bs-slide="next">
+                        <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                        <span class="visually-hidden">Next</span>
+                    </button>
+                    {% endif %}
+                </div>
+                <div class="text-center">
+                    <small class="text-muted">{{ product.images|length }} image(s) from latest timestamp</small>
+                </div>
+            {% else %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> No images found for this product.
+                </div>
+            {% endif %}
+
+            <!-- Image Upload Section -->
+            <div class="mt-3">
+                <h6>📤 Upload New Image</h6>
+                <form id="imageUploadForm" enctype="multipart/form-data">
+                    <div class="mb-2">
+                        <input type="file" class="form-control" id="imageFile" name="image" accept="image/*" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="fas fa-upload"></i> Upload Image
+                    </button>
+                </form>
+                <div id="uploadSpinner" class="mt-2" style="display:none;">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                    <span class="ms-2">Uploading...</span>
+                </div>
+            </div>
+
+
+
+            <!-- Image History Section -->
+            {% if product.image_history %}
+            <div class="mt-4">
+                <h6>📚 Image History</h6>
+                <div class="accordion" id="imageHistoryAccordion">
+                    {% for timestamp, images in product.image_history.items() %}
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="heading{{ loop.index }}">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                    data-bs-target="#collapse{{ loop.index }}" aria-expanded="false" aria-controls="collapse{{ loop.index }}">
+                                {{ timestamp }} ({{ images|length }} image(s))
+                            </button>
+                        </h2>
+                        <div id="collapse{{ loop.index }}" class="accordion-collapse collapse" aria-labelledby="heading{{ loop.index }}" 
+                             data-bs-parent="#imageHistoryAccordion">
+                            <div class="accordion-body">
+                                <div class="row">
+                                    {% for image in images %}
+                                    <div class="col-md-6 mb-2">
+                                        <img src="{{ url_for('static', filename=image) }}" alt="Historical Image"
+                                             class="img-fluid rounded border" style="max-height: 150px; object-fit: contain;">
+                                        <div class="text-center mt-1">
+                                            <small class="text-muted">{{ image.split('/')[-1] }}</small>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Form Section -->
+        <div class="col-md-7">
+            <form method="post" id="productForm">
+                <div class="mb-3">
+                    <label for="serial_number" class="form-label">Serial Number</label>
+                    <input type="text" class="form-control" id="serial_number" name="serial_number"
+                        value="{{ product.serial_number }}" readonly>
+                </div>
+
+                <div class="mb-3">
+                    <label for="model_name" class="form-label">Model Name</label>
+                    <input type="text" class="form-control" id="model_name" name="model_name"
+                        value="{{ product.model_name }}" disabled>
+                </div>
+
+                <div class="mb-3">
+                    <label for="status" class="form-label">Status</label>
+                    <input type="text" class="form-control" id="status" name="status" value="{{ product.status }}"
+                        disabled>
+                </div>
+
+                <div class="mb-3">
+                    <label for="reasoning" class="form-label">LLM Reasoning</label>
+                    <div class="input-group">
+                        <textarea class="form-control" id="reasoning" name="reasoning" rows="4" disabled>{{ product.reasoning }}</textarea>
+                        <button type="button" class="btn btn-info" id="generateReasoningBtn" onclick="generateReasoning()">Generate LLM Reasoning</button>
+                    </div>
+                    <div id="reasoningSpinner" class="mt-2" style="display:none;">
+                        <div class="spinner-border text-info" role="status"></div>
+                        <span class="ms-2">Generating reasoning...</span>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="timestamp" class="form-label">Timestamp</label>
+                    <input type="text" class="form-control" id="timestamp" name="timestamp"
+                        value="{{ product.timestamp }}" readonly>
+                </div>
+
+                <div class="d-flex gap-3">
+                    <button type="button" class="btn btn-warning" onclick="enableEditing()">✏️ Edit</button>
+                    <button type="submit" class="btn btn-success d-none" id="saveBtn">💾 Save</button>
+                    <a href="{{ url_for('database') }}" class="btn btn-secondary">← Back</a>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-danger">❌ Product not found.</div>
+    {% endif %}
+</div>
+
+<!-- JavaScript to enable editing -->
+<script>
+    function enableEditing() {
+        const form = document.getElementById('productForm');
+        form.querySelectorAll('input:not([readonly]), textarea').forEach(field => {
+            field.removeAttribute('disabled');
+        });
+        document.getElementById('saveBtn').classList.remove('d-none');
+    }
+
+    function generateReasoning() {
+        const btn = document.getElementById('generateReasoningBtn');
+        const spinner = document.getElementById('reasoningSpinner');
+        btn.disabled = true;
+        spinner.style.display = 'block';
+        fetch(`/generate_reasoning/{{ product.serial_number }}`, { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('reasoning').value = data.reasoning;
+                spinner.style.display = 'none';
+                btn.disabled = false;
+            })
+            .catch(err => {
+                alert('Failed to generate reasoning.');
+                spinner.style.display = 'none';
+                btn.disabled = false;
+            });
+    }
+
+    // Image upload functionality
+    document.getElementById('imageUploadForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData();
+        const fileInput = document.getElementById('imageFile');
+        const uploadSpinner = document.getElementById('uploadSpinner');
+        
+        if (fileInput.files.length === 0) {
+            alert('Please select an image file.');
+            return;
+        }
+        
+        formData.append('image', fileInput.files[0]);
+        uploadSpinner.style.display = 'block';
+        
+        fetch(`/upload_image/{{ product.serial_number }}`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            uploadSpinner.style.display = 'none';
+            if (data.success) {
+                alert('Image uploaded successfully!');
+                location.reload(); // Refresh to show new image
+            } else {
+                alert('Upload failed: ' + data.error);
+            }
+        })
+        .catch(err => {
+            uploadSpinner.style.display = 'none';
+            alert('Upload failed: ' + err.message);
+        });
+    });
+
+
+</script>
+
+{% endblock %}

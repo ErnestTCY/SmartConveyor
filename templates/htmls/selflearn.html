@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Self-Learn | T4G Dashboard{% endblock %}
+{% block content %}
+<a id="top"></a>
+<div id="trainingIndicator" class="text-center py-4" style="display:none;">
+  <div class="spinner-border text-warning" role="status"></div>
+  <p class="mt-2 fw-bold">Training in progress... please wait</p>
+</div>
+<div id="detectionIndicator" class="text-center py-4" style="display:none;">
+  <div class="spinner-border text-success" role="status"></div>
+  <p class="mt-2 fw-bold">Detection in progress... please wait</p>
+</div>
+<script>
+  function startTraining() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.getElementById("trainingIndicator").style.display = "block";
+    fetch("/train", { method: "POST" })
+      .then(response => response.text())
+      .then(result => {
+        document.getElementById("trainingIndicator").style.display = "none";
+        window.location.reload();
+      });
+  }
+  function startDetection() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.getElementById("detectionIndicator").style.display = "block";
+    window.location.href = "/infer_all";
+  }
+</script>
+<div class="container py-4">
+  <h2 class="mb-4">Image Review</h2>
+  <div class="mb-4">
+    <ul class="nav nav-tabs">
+      <li class="nav-item">
+        <a class="nav-link active" href="{{ url_for('selflearn') }}">🖼️ New Images</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="{{ url_for('review_all') }}">🔍 Detected Images</a>
+      </li>
+    </ul>
+  </div>
+  <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-4">
+    {% for image in images %}
+    <div class="col">
+      <div class="card h-100">
+        <img src="{{ url_for('static', filename='new_images/' + image) }}" class="card-img-top" style="object-fit:cover; height:200px;">
+        <div class="card-body text-center">
+          <a href="{{ url_for('infer', filename=image) }}" class="btn btn-primary btn-sm mb-1">🧠 Run Detection</a>
+          <a href="{{ url_for('delete_image', filename=image) }}" class="btn btn-danger btn-sm mb-1" onclick="return confirm('Delete this image?')">🗑️ Delete</a>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="col-12">
+      <div class="alert alert-info">No new images found in <code>static/new_images/</code>.</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="text-center mt-5 d-flex justify-content-center gap-3">
+    <button onclick="startTraining()" class="btn btn-warning btn-lg">🔥 Retrain Model with Accepted Data</button>
+    <button onclick="startDetection()" class="btn btn-success btn-lg">⚡ Detect All</button>
+  </div>
+</div>
+{% endblock %}

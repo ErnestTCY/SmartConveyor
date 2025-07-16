@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}Review All Predictions | T4G Dashboard{% endblock %}
+{% block content %}
+<div id="acceptAllSpinner" class="text-center py-4" style="display: none;">
+  <div class="spinner-border text-primary" role="status"></div>
+  <p class="mt-2 fw-bold">Accepting all images... please wait</p>
+</div>
+<div class="container py-4">
+  <h2 class="mb-4">Review All Predictions</h2>
+  <div class="mb-4">
+    <ul class="nav nav-tabs">
+      <li class="nav-item">
+        <a class="nav-link" href="{{ url_for('selflearn') }}">🖼️ New Images</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link active" href="{{ url_for('review_all') }}">🔍 Detected Images</a>
+      </li>
+    </ul>
+  </div>
+  <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-4">
+    {% for image in images %}
+    <div class="col">
+      <div class="card h-100">
+        <a href="{{ url_for('review', filename=image) }}">
+          <img src="{{ url_for('static', filename='predictions/' + image) }}" class="card-img-top" style="object-fit:cover; height:200px;" alt="Detected Image">
+        </a>
+        <div class="card-body text-center">
+          <a href="{{ url_for('accept', filename=image) }}" class="btn btn-success btn-sm mb-1">✅ Accept</a>
+          <form action="{{ url_for('delete_image', filename=image) }}" method="get" style="display:inline;">
+            <input type="hidden" name="next" value="{{ url_for('review_all') }}">
+            <button type="submit" class="btn btn-danger btn-sm mb-1" onclick="return confirm('Delete this image?')">🗑️ Delete</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="col-12">
+      <div class="alert alert-info">No predictions found in <code>static/predictions/</code>.</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="text-center mt-5 d-flex justify-content-center gap-3">
+    <a href="{{ url_for('selflearn') }}" class="btn btn-secondary btn-lg">← Back</a>
+    <button onclick="handleAcceptAll()" class="btn btn-success btn-lg">✅ Accept All</button>
+  </div>
+</div>
+<script>
+  function handleAcceptAll() {
+    document.getElementById("acceptAllSpinner").style.display = "block";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    fetch("/accept_all", { method: "POST" })
+      .then(response => {
+        if (response.redirected) {
+          window.location.href = response.url;
+        } else {
+          location.reload();
+        }
+      })
+      .catch(error => {
+        alert("Something went wrong while accepting all images.");
+        console.error(error);
+        document.getElementById("acceptAllSpinner").style.display = "none";
+      });
+  }
+</script>
+{% endblock %}
