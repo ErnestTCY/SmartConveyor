@@ -1,0 +1,23 @@
+[
+  {
+    "serial_number": "1234567890001",
+    "status": "healthy",
+    "model_name": "SolarMax 3000",
+    "timestamp": "2025-07-16T10:00:00",
+    "image_path": "product_images/1234567890001/2025-07-16T10-00-00/yolo_1234567890001_1_1752636543.jpg"
+  },
+  {
+    "serial_number": "1234567890002",
+    "status": "cracked",
+    "model_name": "SolarMax 3000",
+    "timestamp": "2025-07-16T10:05:00",
+    "image_path": "product_images/1234567890002/2025-07-16T10-05-00/yolo_1234567890002_1_1752636543.jpg"
+  },
+  {
+    "serial_number": "1234567890003",
+    "status": "unknown",
+    "model_name": "EcoSun 2000",
+    "timestamp": "2025-07-16T10:10:00",
+    "image_path": "product_images/1234567890003/2025-07-16T10-10-00/yolo_1234567890003_1_1752636543.jpg"
+  }
+]

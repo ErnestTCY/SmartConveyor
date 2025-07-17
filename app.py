@@ -388,6 +388,9 @@ threading.Thread(target=start_camera_loop, daemon=True).start()
 # === YOLO Model Loading ===
 def load_latest_model():
     model_dir = "trained_models"
+    # Ensure the directory exists
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir, exist_ok=True)
     pt_files = [f for f in os.listdir(model_dir) if f.endswith('.pt')]
     if not pt_files:
         print("⚠ No .pt model found in trained_models/. Using fallback.")
@@ -823,6 +826,55 @@ def upload_yolo_images():
     # === End update products.json ===
 
     return jsonify({'success': True, 'saved': saved_files})
+
+@app.route('/api/analytics_data')
+def analytics_data():
+    """API endpoint to provide business analytics for solar board statistics."""
+    try:
+        products = load_products()
+        total_boards = len(products)
+        cracked_boards = 0
+        healthy_boards = 0
+        unknown_boards = 0
+        total_images = 0
+        images_per_board = []
+        status_counts = {}
+
+        for product in products:
+            status = product.get('status', '').lower()
+            if 'crack' in status:
+                cracked_boards += 1
+            elif 'healthy' in status or 'ok' in status:
+                healthy_boards += 1
+            else:
+                unknown_boards += 1
+            # Count images
+            serial_number = product.get('serial_number')
+            if serial_number:
+                image_history = get_product_image_history(serial_number)
+                num_images = sum(len(imgs) for imgs in image_history.values())
+                images_per_board.append(num_images)
+                total_images += num_images
+            # Count status
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+        avg_images_per_board = round(total_images / total_boards, 2) if total_boards else 0
+        cracked_percent = round((cracked_boards / total_boards) * 100, 2) if total_boards else 0
+        healthy_percent = round((healthy_boards / total_boards) * 100, 2) if total_boards else 0
+
+        return jsonify({
+            'total_boards': total_boards,
+            'cracked_boards': cracked_boards,
+            'healthy_boards': healthy_boards,
+            'unknown_boards': unknown_boards,
+            'avg_images_per_board': avg_images_per_board,
+            'total_images': total_images,
+            'cracked_percent': cracked_percent,
+            'healthy_percent': healthy_percent,
+            'status_counts': status_counts
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True) 
