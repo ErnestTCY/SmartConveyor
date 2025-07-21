@@ -16,6 +16,8 @@ import glob
 import requests
 import base64
 import logging
+import time
+import socket
 # === App Setup ===
 app = Flask(__name__, template_folder='templates/htmls', static_folder='static')
 load_dotenv()
@@ -25,16 +27,34 @@ logging.basicConfig(filename='flask_upload.log', level=logging.INFO)
 MQTT_BROKER = 'broker.hivemq.com'
 MQTT_PORT = 1883
 MQTT_TOPIC = 'robotic_arm/command'
+MQTT_HEARTBEAT_TOPIC = 'robotic_arm/heartbeat'
 mqtt_client = mqtt.Client()
-mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
 
-# === Gemini API Setup ===
-genai.configure(api_key=os.getenv('GEMINI_API_KEY', ''))
+# MQTT connection state
+mqtt_connected = threading.Event()
 
-# Add to global section
-current_temperature = {"value": 0.0}
+# MQTT Callbacks
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        logging.info('[MQTT] Connected successfully')
+        mqtt_connected.set()
+    else:
+        logging.warning(f'[MQTT] Connection failed with code {rc}')
+        mqtt_connected.clear()
 
-# Inside the MQTT setup:
+def on_disconnect(client, userdata, rc):
+    logging.warning(f'[MQTT] Disconnected (rc={rc})')
+    mqtt_connected.clear()
+    # Try to reconnect in a loop
+    while not mqtt_connected.is_set():
+        try:
+            logging.info('[MQTT] Attempting to reconnect...')
+            client.reconnect()
+            break
+        except Exception as e:
+            logging.error(f'[MQTT] Reconnect failed: {e}')
+            time.sleep(5)
+
 def on_message(client, userdata, msg):
     global current_temperature
     topic = msg.topic
@@ -46,6 +66,34 @@ def on_message(client, userdata, msg):
         except ValueError:
             print("⚠️ Invalid temperature received:", payload)
 
+mqtt_client.on_connect = on_connect
+mqtt_client.on_disconnect = on_disconnect
+mqtt_client.on_message = on_message
+
+# Start MQTT loop in background
+mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+def start_mqtt_loop():
+    mqtt_client.loop_forever()
+threading.Thread(target=start_mqtt_loop, daemon=True).start()
+
+# Heartbeat function
+def mqtt_heartbeat():
+    while True:
+        if mqtt_connected.is_set():
+            try:
+                mqtt_client.publish(MQTT_HEARTBEAT_TOPIC, json.dumps({'status': 'alive', 'timestamp': datetime.now().isoformat()}))
+                logging.info('[MQTT] Heartbeat sent')
+            except Exception as e:
+                logging.error(f'[MQTT] Heartbeat publish failed: {e}')
+        # Only sleep and check again, do not send heartbeat if not connected
+        time.sleep(15)
+threading.Thread(target=mqtt_heartbeat, daemon=True).start()
+
+# === Gemini API Setup ===
+genai.configure(api_key=os.getenv('GEMINI_API_KEY', ''))
+
+# Add to global section
+current_temperature = {"value": 0.0}
 
 # === Image Directory Management Functions ===
 def get_latest_timestamp_directory(serial_number):
@@ -135,6 +183,14 @@ def get_product_image_history(serial_number):
     
     return history
 
+def get_thermal_images_from_timestamp_directory(serial_number, timestamp_dir):
+    dir_path = os.path.join('static', 'product_images', serial_number, timestamp_dir, 'thermal')
+    if not os.path.exists(dir_path):
+        return []
+    image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
+    images = [f for f in os.listdir(dir_path) if f.lower().endswith(image_extensions)]
+    return [f'product_images/{serial_number}/{timestamp_dir}/thermal/{img}' for img in images]
+
 # === YOLOv8 Label Storage and Processing ===
 def get_labels_directory(serial_number, timestamp_dir):
     """Get the labels directory path for a specific timestamp"""
@@ -176,6 +232,8 @@ def save_yolo_labels(serial_number, timestamp_dir, image_filename, results):
             "total_detections": len(detections)
         }, f, indent=2)
     
+    # Update status.json after saving label
+    update_status_json(serial_number, timestamp_dir)
     return label_path
 
 def load_yolo_labels(serial_number, timestamp_dir, image_filename):
@@ -200,7 +258,7 @@ def process_all_images_in_timestamp(serial_number, timestamp_dir):
         
         if os.path.exists(fs_image_path):
             # Run YOLOv8 detection
-            results = model.predict(source=fs_image_path, conf=0.5)
+            results = model.predict(source=fs_image_path, conf=0.5, verbose=False)
             
             # Extract filename from path
             image_filename = os.path.basename(image_path)
@@ -254,7 +312,7 @@ def get_crack_description_from_labels(serial_number, timestamp_dir):
     return all_detections
 
 def get_crack_description(image_path):
-    results = model.predict(source=image_path, conf=0.5)
+    results = model.predict(source=image_path, conf=0.5, verbose=False)
     crack_descriptions = []
 
     for result in results:
@@ -275,34 +333,39 @@ def get_crack_description(image_path):
 
     return crack_descriptions
 
-def generate_gemini_reasoning(product):
+def save_reasoning(serial_number, timestamp_dir, reasoning_text):
+    reasoning_path = os.path.join('static', 'product_images', serial_number, timestamp_dir, 'reasoning.json')
+    with open(reasoning_path, 'w') as f:
+        json.dump({
+            'serial_number': serial_number,
+            'timestamp': timestamp_dir,
+            'reasoning': reasoning_text
+        }, f, indent=2)
+    return reasoning_path
+
+def load_reasoning(serial_number, timestamp_dir):
+    reasoning_path = os.path.join('static', 'product_images', serial_number, timestamp_dir, 'reasoning.json')
+    if os.path.exists(reasoning_path):
+        with open(reasoning_path, 'r') as f:
+            return json.load(f).get('reasoning', None)
+    return None
+
+def generate_gemini_reasoning(product, timestamp=None):
     try:
         serial_number = product['serial_number']
-        
-        # Get the latest timestamp directory
-        latest_timestamp = get_latest_timestamp_directory(serial_number)
-        if not latest_timestamp:
+        if not timestamp:
+            timestamp = get_latest_timestamp_directory(serial_number)
+        if not timestamp:
             return "No images found for analysis."
-        
-        # Check if labels exist, if not, process all images in the timestamp
-        images = get_images_from_timestamp_directory(serial_number, latest_timestamp)
+        images = get_images_from_timestamp_directory(serial_number, timestamp)
         if not images:
-            return "No images found in the latest timestamp directory."
-        
-        # Check if labels exist for the first image
+            return "No images found in the selected timestamp directory."
         first_image_filename = os.path.basename(images[0])
-        existing_labels = load_yolo_labels(serial_number, latest_timestamp, first_image_filename)
-        
+        existing_labels = load_yolo_labels(serial_number, timestamp, first_image_filename)
         if existing_labels is None:
-            # Process all images and save labels
-            print(f"🔄 Processing all images in {latest_timestamp} for {serial_number}...")
-            all_detections = process_all_images_in_timestamp(serial_number, latest_timestamp)
+            all_detections = process_all_images_in_timestamp(serial_number, timestamp)
         else:
-            # Use existing labels
-            print(f"📋 Using existing labels for {serial_number}...")
-            all_detections = get_crack_description_from_labels(serial_number, latest_timestamp)
-        
-        # Format crack information for all images
+            all_detections = get_crack_description_from_labels(serial_number, timestamp)
         if all_detections:
             crack_info_parts = []
             for i, detection in enumerate(all_detections):
@@ -314,21 +377,28 @@ def generate_gemini_reasoning(product):
             crack_info = "\n".join(crack_info_parts)
         else:
             crack_info = "No cracks detected by YOLOv8 in any of the images."
+        # Get status for the current timestamp
+        status = None
+        if 'status_by_timestamp' in product and timestamp in product['status_by_timestamp']:
+            status = product['status_by_timestamp'][timestamp]
+        else:
+            status = load_status(serial_number, timestamp)
+        if not status:
+            status = 'unknown'
 
         prompt = f"""
+
+        Analysis of Solarboard Damage: (state the serial number and timestamp at first)
+        Serial Number: {serial_number}
+        Timestamp: {timestamp}
         You are an expert solar board diagnostics assistant.
         Analyze the cause of damage to the solarboard below:
-
-        Serial Number: {serial_number}
         Model Name: {product['model_name']}
-        Status: {product['status']}
-        Specs: {product.get('specs_json', {})}
-        Timestamp: {product.get('timestamp')}
-        Images Analyzed: {len(images)} images from timestamp {latest_timestamp}
+        Status: {status}
+        Images Analyzed: {len(images)} images from timestamp {timestamp}
 
         YOLOv8 Detection Summary (All Images):
         {crack_info}
-
         Based on the above detection and production parameters, identify likely causes for the crack(s) and give actionable recommendations.
 
         Production parameters to consider:
@@ -343,11 +413,11 @@ def generate_gemini_reasoning(product):
 
         Include estimated faulty parameter values if possible.
         """
-
         model = genai.GenerativeModel("models/gemini-1.5-flash")
         response = model.generate_content(prompt)
-        return response.text.strip()
-
+        reasoning_text = response.text.strip()
+        save_reasoning(serial_number, timestamp, reasoning_text)
+        return reasoning_text
     except Exception as e:
         print(f"[Gemini ERROR] {e}")
         return "Gemini reasoning failed."
@@ -406,6 +476,100 @@ PRED_DIR = 'static/predictions'
 TRAIN_IMG_DIR = 'train/images'
 TRAIN_LABEL_DIR = 'train/labels'
 
+def update_status_json(serial_number, timestamp_dir):
+    labels_dir = get_labels_directory(serial_number, timestamp_dir)
+    status = 'normal'
+    for label_file in glob.glob(os.path.join(labels_dir, '*_labels.json')):
+        with open(label_file, 'r') as f:
+            data = json.load(f)
+            for det in data.get('detections', []):
+                if 'crack' in str(det.get('class', '')).lower():
+                    status = 'cracked'
+                    break
+        if status == 'cracked':
+            break
+    status_path = os.path.join('static', 'product_images', serial_number, timestamp_dir, 'status.json')
+    with open(status_path, 'w') as f:
+        json.dump({'status': status}, f)
+    return status
+
+def load_status(serial_number, timestamp_dir):
+    status_path = os.path.join('static', 'product_images', serial_number, timestamp_dir, 'status.json')
+    if os.path.exists(status_path):
+        with open(status_path, 'r') as f:
+            return json.load(f).get('status', 'unknown')
+    return 'unknown'
+
+# Patch save_yolo_labels to update status.json after saving a label
+def save_yolo_labels(serial_number, timestamp_dir, image_filename, results):
+    labels_dir = get_labels_directory(serial_number, timestamp_dir)
+    os.makedirs(labels_dir, exist_ok=True)
+    
+    # Extract detection data
+    detections = []
+    for result in results:
+        if result.boxes:
+            for box in result.boxes:
+                xyxy = box.xyxy[0].tolist()  # [x1, y1, x2, y2]
+                class_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                width = xyxy[2] - xyxy[0]
+                height = xyxy[3] - xyxy[1]
+
+                detections.append({
+                    "class": result.names[class_id] if hasattr(result, "names") else f"class_{class_id}",
+                    "confidence": round(conf, 2),
+                    "position": {"x": int(xyxy[0]), "y": int(xyxy[1])},
+                    "size": {"width": int(width), "height": int(height)},
+                    "bbox": xyxy
+                })
+    
+    # Save as JSON
+    label_filename = os.path.splitext(image_filename)[0] + '_labels.json'
+    label_path = os.path.join(labels_dir, label_filename)
+    
+    with open(label_path, 'w') as f:
+        json.dump({
+            "image_filename": image_filename,
+            "timestamp": datetime.now().isoformat(),
+            "detections": detections,
+            "total_detections": len(detections)
+        }, f, indent=2)
+    
+    # Update status.json after saving label
+    update_status_json(serial_number, timestamp_dir)
+    return label_path
+
+def update_all_products_status_by_timestamp():
+    products = load_products()
+    changed = False
+    for product in products:
+        serial_number = product.get("serial_number")
+        if not serial_number:
+            continue
+        base_path = os.path.join('static', 'product_images', serial_number)
+        if not os.path.exists(base_path):
+            continue
+        status_by_timestamp = {}
+        for timestamp in os.listdir(base_path):
+            ts_path = os.path.join(base_path, timestamp)
+            if not os.path.isdir(ts_path):
+                continue
+            status_path = os.path.join(ts_path, 'status.json')
+            if os.path.exists(status_path):
+                try:
+                    with open(status_path, 'r') as f:
+                        status = json.load(f).get('status', 'unknown')
+                except Exception:
+                    status = 'unknown'
+                status_by_timestamp[timestamp] = status
+        if status_by_timestamp:
+            if product.get("status_by_timestamp") != status_by_timestamp:
+                product["status_by_timestamp"] = status_by_timestamp
+                changed = True
+    if changed:
+        save_products(products)
+
 # === Flask Routes ===
 @app.route('/')
 def home():
@@ -413,6 +577,7 @@ def home():
 
 @app.route('/analytics')
 def analytics():
+    update_all_products_status_by_timestamp()  # Ensure status_by_timestamp is up to date
     return render_template('analytics.html')
 
 @app.route('/livestream')
@@ -473,21 +638,18 @@ def send_mqtt():
 @app.route('/database')
 def database():
     products = load_products()
-    
-    # Update each product with latest images
     for product in products:
         serial_number = product["serial_number"]
+        latest_timestamp = get_latest_timestamp_directory(serial_number)
         latest_images = get_latest_images_for_product(serial_number)
+        print(f"{serial_number} | latest_timestamp: {latest_timestamp} | latest_images: {latest_images}")
         product["latest_images"] = latest_images
-        
-        # Update image_path to use latest image if available
-        if latest_images:
-            product["image_path"] = latest_images[0]
-        elif product.get("image_path"):
-            # Fallback to old structure
-            filename = os.path.basename(product["image_path"])
-            product["image_path"] = f"product_images/{filename}"
-    
+        product["timestamp"] = latest_timestamp if latest_timestamp else "-"
+        # Load status from status.json
+        if latest_timestamp:
+            product["status"] = load_status(serial_number, latest_timestamp)
+        else:
+            product["status"] = 'unknown'
     return render_template('database.html', products=products)
 
 @app.route('/product/<serial_number>', methods=['GET', 'POST'])
@@ -496,27 +658,33 @@ def product_detail(serial_number):
     product = next((p for p in products if p["serial_number"] == serial_number), None)
     if not product:
         return "Product not found", 404
-    
     # Get latest images for the product
     latest_images = get_latest_images_for_product(serial_number)
     product["images"] = latest_images
-    
     # Get image history for the product
     image_history = get_product_image_history(serial_number)
     product["image_history"] = image_history
-    
-    # Update the main image_path to use the latest image if available
-    if latest_images:
-        product["image_path"] = latest_images[0]  # Use the first image as main
-    elif product.get("image_path"):
-        # Fallback to old structure if no new images found
-        filename = os.path.basename(product["image_path"])
-        product["image_path"] = f"product_images/{filename}"
-    
+    # Get thermal image history for the product
+    thermal_history = {}
+    for ts in image_history.keys():
+        imgs = get_thermal_images_from_timestamp_directory(serial_number, ts)
+        if imgs is None:
+            imgs = []
+        thermal_history[ts] = imgs
+    product["thermal_history"] = thermal_history
+    # Set status for each timestamp in image_history
+    product["status_by_timestamp"] = {}
+    for ts in image_history.keys():
+        product["status_by_timestamp"][ts] = load_status(serial_number, ts)
+    # Set status for latest timestamp
+    latest_timestamp = get_latest_timestamp_directory(serial_number)
+    if latest_timestamp:
+        product["status"] = load_status(serial_number, latest_timestamp)
+    else:
+        product["status"] = 'unknown'
     if request.method == 'POST':
         product["model_name"] = request.form["model_name"]
         product["status"] = request.form["status"]
-        product["reasoning"] = request.form.get("reasoning", product.get("reasoning", ""))
         save_products(products)
         return redirect(url_for('product_detail', serial_number=serial_number))
     return render_template('product.html', product=product)
@@ -527,36 +695,42 @@ def generate_reasoning(serial_number):
     product = next((p for p in products if p["serial_number"] == serial_number), None)
     if not product:
         return {"error": "Product not found"}, 404
-    reasoning = generate_gemini_reasoning(product)
-    product["reasoning"] = reasoning
-    save_products(products)
+    # Get timestamp from POST data (JSON or form) or query param
+    timestamp = request.form.get('timestamp') or request.args.get('timestamp')
+    if not timestamp and request.is_json:
+        timestamp = request.get_json().get('timestamp')
+    if not timestamp:
+        timestamp = get_latest_timestamp_directory(serial_number)
+    if not timestamp:
+        return {"error": "No images found for this product"}, 404
+    # Generate reasoning for the specified timestamp
+    reasoning = generate_gemini_reasoning(product, timestamp)
     return {"reasoning": reasoning}
+
+@app.route('/get_reasoning/<serial_number>/<timestamp>', methods=['GET'])
+def get_reasoning(serial_number, timestamp):
+    reasoning = load_reasoning(serial_number, timestamp)
+    if reasoning:
+        return {"reasoning": reasoning}
+    else:
+        return {"reasoning": None, "message": "Click the button below to generate reasoning."}
+
+@app.route('/get_status/<serial_number>/<timestamp>', methods=['GET'])
+def get_status(serial_number, timestamp):
+    status = load_status(serial_number, timestamp)
+    return {"status": status}
 
 @app.route('/upload_image/<serial_number>', methods=['POST'])
 def upload_image(serial_number):
-    """Upload new images for a product to the latest timestamp directory"""
     if 'image' not in request.files:
         return {"error": "No image file provided"}, 400
-    
     image_file = request.files['image']
     if image_file.filename == '':
         return {"error": "No image file selected"}, 400
-    
     try:
         # Save image to timestamp directory
         image_path = save_image_to_timestamp_directory(serial_number, image_file)
-        
-        # Update product in database if it exists
-        products = load_products()
-        product = next((p for p in products if p["serial_number"] == serial_number), None)
-        
-        if product:
-            # Update timestamp to current time
-            product["timestamp"] = datetime.now().isoformat()
-            save_products(products)
-        
         return {"success": True, "image_path": image_path}
-    
     except Exception as e:
         return {"error": f"Failed to upload image: {str(e)}"}, 500
 
@@ -628,6 +802,7 @@ def infer(filename):
         save=True,
         project='static',
         name='predictions',
+        verbose=False,
         exist_ok=True
     )
     return redirect(url_for('review', filename=filename))
@@ -643,7 +818,7 @@ def accept(filename):
     label_path = os.path.join(TRAIN_LABEL_DIR, label_filename)
     os.makedirs(TRAIN_IMG_DIR, exist_ok=True)
     os.makedirs(TRAIN_LABEL_DIR, exist_ok=True)
-    results = model.predict(source=src_img, conf=0.5)
+    results = model.predict(source=src_img, conf=0.5, verbose=False)
     for r in results:
         if r.boxes or r.masks:
             r.save_txt(label_path)
@@ -664,6 +839,7 @@ def infer_all():
             save=True,
             project='static',
             name='predictions',
+            verbose=False ,
             exist_ok=True
         )
     return redirect(url_for('review_all'))
@@ -702,7 +878,7 @@ def accept_all():
         label_filename = filename.replace('.jpg', '.txt').replace('.png', '.txt')
         label_path = os.path.join(TRAIN_LABEL_DIR, label_filename)
         if os.path.exists(new_img_path):
-            results = model.predict(source=new_img_path, conf=0.5)
+            results = model.predict(source=new_img_path, conf=0.5, verbose=False)
             for r in results:
                 if r.boxes or r.masks:
                     r.save_txt(label_path)
@@ -738,7 +914,7 @@ def upload_yolo_images():
     serial_number = str(data.get('serial_number'))
     timestamp = str(data.get('timestamp'))
     images = data.get('images', {})
-
+    model_name = data.get('model_name', 'unknown yet')  # Declare model_name at the top
     if not serial_number or not images:
         print('[UPLOAD ERROR] Missing serial_number or images in request')
         return jsonify({'error': 'Missing serial_number or images'}), 400
@@ -753,42 +929,54 @@ def upload_yolo_images():
     saved_files = []
     received_filenames = []
     yolo_thermal_filenames = []
+
     for key, img_info in images.items():
         filename = img_info['filename']
         img_b64 = img_info['data']
         if not filename or not img_b64:
             continue
         img_bytes = base64.b64decode(img_b64)
-        if key in ["yolo", "thermal"]:
-            # Save to product_images/<serial>/<timestamp>/
+
+        if key == "yolo":
             product_path = os.path.join(product_dir, filename)
-            with open(product_path, 'wb') as f:
-                f.write(img_bytes)
+            if os.path.exists(product_path):
+                print(f"[SKIPPED] Image already exists: {filename}")
+            else:
+                with open(product_path, 'wb') as f:
+                    f.write(img_bytes)
             saved_files.append(product_path)
             received_filenames.append(filename)
             yolo_thermal_filenames.append(filename)
-            # === Run YOLO detection and save JSON labels instantly for YOLO images ===
-            if key == "yolo":
-                try:
-                    # Run YOLO detection
-                    results = model.predict(source=product_path, conf=0.5)
-                    # Save labels as JSON
-                    save_yolo_labels(serial_number, timestamp, filename, results)
-                    print(f"[YOLO LABELS] Saved for {filename}")
-                except Exception as e:
-                    print(f"[YOLO ERROR] Could not process {filename}: {e}")
+
+        elif key == "thermal":
+            thermal_dir = os.path.join(product_dir, "thermal")
+            os.makedirs(thermal_dir, exist_ok=True)
+            thermal_path = os.path.join(thermal_dir, filename)
+            if os.path.exists(thermal_path):
+                print(f"[SKIPPED] Image already exists: {filename}")
+            else:
+                with open(thermal_path, 'wb') as f:
+                    f.write(img_bytes)
+            saved_files.append(thermal_path)
+            received_filenames.append(filename)
+
         elif key in ["light", "no_light"]:
-            # Save to static/new_images/
             new_image_path = os.path.join(new_images_dir, filename)
-            with open(new_image_path, 'wb') as f:
-                f.write(img_bytes)
+            if os.path.exists(new_image_path):
+                print(f"[SKIPPED] Image already exists: {filename}")
+            else:
+                with open(new_image_path, 'wb') as f:
+                    f.write(img_bytes)
             saved_files.append(new_image_path)
             received_filenames.append(filename)
+
         else:
-            # Default: save to product_dir
             product_path = os.path.join(product_dir, filename)
-            with open(product_path, 'wb') as f:
-                f.write(img_bytes)
+            if os.path.exists(product_path):
+                print(f"[SKIPPED] Image already exists: {filename}")
+            else:
+                with open(product_path, 'wb') as f:
+                    f.write(img_bytes)
             saved_files.append(product_path)
             received_filenames.append(filename)
 
@@ -800,32 +988,48 @@ def upload_yolo_images():
     except Exception:
         products = []
 
-    # Find product by serial number
     product = next((p for p in products if p.get("serial_number") == serial_number), None)
-    # Only use a product image for image_path (not light/no_light)
     image_path = f"product_images/{serial_number}/{timestamp}/{yolo_thermal_filenames[0]}" if yolo_thermal_filenames else ""
+
     if product:
-        # Update timestamp, image_path, and set status/model_name/reasoning to 'unknown yet'
         product["timestamp"] = timestamp
         product["image_path"] = image_path
-        product["status"] = "unknown yet"
-        product["model_name"] = "unknown yet"
-        product["reasoning"] = "unknown yet"
+        product["status"] = "unknown"
+        product["model_name"] = model_name
     else:
-        # Add new product entry
         new_product = {
             "serial_number": serial_number,
             "timestamp": timestamp,
             "status": "unknown yet",
             "model_name": "unknown yet",
-            "reasoning": "unknown yet",
             "image_path": image_path
         }
         products.append(new_product)
+
     save_products(products)
-    # === End update products.json ===
+
+    # === Ensure labels directory exists ===
+    labels_dir = get_labels_directory(serial_number, timestamp)
+    os.makedirs(labels_dir, exist_ok=True)
+
+    # === YOLO inference for yolo_*.jpg only if labels don't exist ===
+    for filename in os.listdir(product_dir):
+        if filename.startswith("yolo_") and filename.endswith(".jpg"):
+            product_path = os.path.join(product_dir, filename)
+            label_path = os.path.join(labels_dir, os.path.splitext(filename)[0] + '_labels.json')
+
+            if not os.path.exists(label_path):
+                try:
+                    results = model.predict(source=product_path, conf=0.5, verbose=False)
+                    save_yolo_labels(serial_number, timestamp, filename, results)
+                    print(f"[YOLO LABELS] Saved for {filename}")
+                except Exception as e:
+                    print(f"[YOLO ERROR] Could not process {filename}: {e}")
+            else:
+                print(f"[SKIPPED] Label already exists for {filename}")
 
     return jsonify({'success': True, 'saved': saved_files})
+
 
 @app.route('/api/analytics_data')
 def analytics_data():
@@ -877,4 +1081,7 @@ def analytics_data():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True) 
+    host_ip = socket.gethostbyname(socket.gethostname())
+    port = 5000
+    print(f"\n============================================\nServer running at: http://{host_ip}:{port}\n============================================\n")
+    app.run(host="0.0.0.0", port=port, debug=True) 

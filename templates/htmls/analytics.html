@@ -1,21 +1,133 @@
 {% extends 'base.html' %}
 {% block title %}Analytics | T4G Dashboard{% endblock %}
 {% block content %}
-<h1>Analytics</h1>
-<p>Welcome to the analytics dashboard. Add your analytics content here.</p>
+<h1 class="mb-4">📊 Analytics Dashboard</h1>
+<p class="lead">Welcome to the analytics dashboard. Here you can view business statistics and trends for your solar boards.</p>
+
+<!-- Business Analytics Summary -->
+<div class="row mb-4">
+  <div class="col-12">
+    <div class="card shadow border-0">
+      <div class="card-body">
+        <h5 class="card-title mb-3"><i class="bi bi-graph-up-arrow"></i> Business Analytics Summary</h5>
+        <div id="analyticsSummary">
+          <div class="text-secondary">Loading analytics...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="row my-4">
-  <div class="col-md-6">
-    <h5>Inspection Accuracy</h5>
-    <canvas id="accuracyGauge"></canvas>
+  <div class="col-md-4 mb-4">
+    <div class="card h-100 shadow border-0">
+      <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-bullseye"></i> Inspection Accuracy</h5>
+        <canvas id="accuracyGauge"></canvas>
+      </div>
+    </div>
   </div>
-  <div class="col-md-6">
-    <h5>Temperature Trends</h5>
-    <canvas id="tempChart"></canvas>
+  <div class="col-md-4 mb-4">
+    <div class="card h-100 shadow border-0">
+      <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-exclamation-triangle"></i> Cracked Boards Rate</h5>
+        <canvas id="crackGauge"></canvas>
+        <div id="crackGaugeLabel" class="mt-2 fw-bold text-center"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 mb-4">
+    <div class="card h-100 shadow border-0">
+      <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-thermometer-half"></i> Temperature Trends</h5>
+        <canvas id="tempChart"></canvas>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
+  // Fetch analytics data and update the summary and cracked boards gauge
+  fetch('/api/analytics_data')
+    .then(res => res.json())
+    .then(data => {
+      if (data.error) {
+        document.getElementById('analyticsSummary').innerHTML = `<div class='text-danger'>Error loading analytics: ${data.error}</div>`;
+        return;
+      }
+      if (!data.total_boards) {
+        document.getElementById('analyticsSummary').innerHTML = `<div class='text-warning'>No analytics data available. Please add products to the database.</div>`;
+        return;
+      }
+      // Update summary with Bootstrap badges and icons
+      let summaryHtml = `
+        <div class="row text-center">
+          <div class="col-md-2 mb-2">
+            <span class="badge bg-primary fs-5"><i class="bi bi-collection"></i> ${data.total_boards}</span><br>
+            <small>Total Boards</small>
+          </div>
+          <div class="col-md-2 mb-2">
+            <span class="badge bg-danger fs-5"><i class="bi bi-exclamation-octagon"></i> ${data.cracked_boards}</span><br>
+            <small>Cracked</small>
+          </div>
+          <div class="col-md-2 mb-2">
+            <span class="badge bg-success fs-5"><i class="bi bi-check-circle"></i> ${data.healthy_boards}</span><br>
+            <small>Healthy</small>
+          </div>
+          <div class="col-md-2 mb-2">
+            <span class="badge bg-secondary fs-5"><i class="bi bi-question-circle"></i> ${data.unknown_boards}</span><br>
+            <small>Unknown</small>
+          </div>
+          <div class="col-md-2 mb-2">
+            <span class="badge bg-info text-dark fs-5"><i class="bi bi-images"></i> ${data.avg_images_per_board}</span><br>
+            <small>Avg Images/Board</small>
+          </div>
+          <div class="col-md-2 mb-2">
+            <span class="badge bg-warning text-dark fs-5"><i class="bi bi-image"></i> ${data.total_images}</span><br>
+            <small>Total Images</small>
+          </div>
+        </div>
+        <div class="row mt-3">
+          <div class="col-12">
+            <div class="card bg-light border-0">
+              <div class="card-body p-2">
+                <strong>Status Breakdown:</strong>
+                <ul class="list-inline mb-0">
+                  ${Object.entries(data.status_counts || {}).map(([status, count]) => `<li class="list-inline-item"><span class="badge bg-dark">${status || 'unknown'}: ${count}</span></li>`).join('')}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById('analyticsSummary').innerHTML = summaryHtml;
+
+      // Cracked Boards Gauge
+      const crackedPercent = data.cracked_percent || 0;
+      const healthyPercent = data.healthy_percent || 0;
+      const unknownPercent = 100 - crackedPercent - healthyPercent;
+      new Chart(document.getElementById('crackGauge'), {
+        type: 'doughnut',
+        data: {
+          labels: ['Cracked', 'Healthy', 'Unknown'],
+          datasets: [{
+            data: [crackedPercent, healthyPercent, unknownPercent],
+            backgroundColor: ['#dc3545', '#28a745', '#ffc107']
+          }]
+        },
+        options: {
+          cutout: '80%',
+          plugins: {
+            legend: { display: true }
+          }
+        }
+      });
+      document.getElementById('crackGaugeLabel').innerText = `Cracked: ${crackedPercent}%`;
+    })
+    .catch(err => {
+      document.getElementById('analyticsSummary').innerHTML = `<div class='text-danger'>Failed to load analytics data. Please check your server/API. (${err})</div>`;
+    });
+
   // Sample Gauge (using Doughnut to simulate)
   new Chart(document.getElementById('accuracyGauge'), {
     type: 'doughnut',

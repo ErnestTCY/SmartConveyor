@@ -40,25 +40,6 @@
                 </div>
             {% endif %}
 
-            <!-- Image Upload Section -->
-            <div class="mt-3">
-                <h6>📤 Upload New Image</h6>
-                <form id="imageUploadForm" enctype="multipart/form-data">
-                    <div class="mb-2">
-                        <input type="file" class="form-control" id="imageFile" name="image" accept="image/*" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-sm">
-                        <i class="fas fa-upload"></i> Upload Image
-                    </button>
-                </form>
-                <div id="uploadSpinner" class="mt-2" style="display:none;">
-                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                    <span class="ms-2">Uploading...</span>
-                </div>
-            </div>
-
-
-
             <!-- Image History Section -->
             {% if product.image_history %}
             <div class="mt-4">
@@ -79,6 +60,41 @@
                                     {% for image in images %}
                                     <div class="col-md-6 mb-2">
                                         <img src="{{ url_for('static', filename=image) }}" alt="Historical Image"
+                                             class="img-fluid rounded border" style="max-height: 150px; object-fit: contain;">
+                                        <div class="text-center mt-1">
+                                            <small class="text-muted">{{ image.split('/')[-1] }}</small>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Thermal History Section -->
+            {% if product.thermal_history %}
+            <div class="mt-4">
+                <h6>🌡️ Thermal History</h6>
+                <div class="accordion" id="thermalHistoryAccordion">
+                    {% for timestamp, images in product.thermal_history.items() %}
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="thermalHeading{{ loop.index }}">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                    data-bs-target="#thermalCollapse{{ loop.index }}" aria-expanded="false" aria-controls="thermalCollapse{{ loop.index }}">
+                                {{ timestamp }} ({{ images|length }} thermal image(s))
+                            </button>
+                        </h2>
+                        <div id="thermalCollapse{{ loop.index }}" class="accordion-collapse collapse" aria-labelledby="thermalHeading{{ loop.index }}" 
+                             data-bs-parent="#thermalHistoryAccordion">
+                            <div class="accordion-body">
+                                <div class="row">
+                                    {% for image in images %}
+                                    <div class="col-md-6 mb-2">
+                                        <img src="{{ url_for('static', filename=image) }}" alt="Thermal Image"
                                              class="img-fluid rounded border" style="max-height: 150px; object-fit: contain;">
                                         <div class="text-center mt-1">
                                             <small class="text-muted">{{ image.split('/')[-1] }}</small>
@@ -116,30 +132,36 @@
                         disabled>
                 </div>
 
-                <div class="mb-3">
-                    <label for="reasoning" class="form-label">LLM Reasoning</label>
-                    <div class="input-group">
-                        <textarea class="form-control" id="reasoning" name="reasoning" rows="4" disabled>{{ product.reasoning }}</textarea>
-                        <button type="button" class="btn btn-info" id="generateReasoningBtn" onclick="generateReasoning()">Generate LLM Reasoning</button>
-                    </div>
-                    <div id="reasoningSpinner" class="mt-2" style="display:none;">
-                        <div class="spinner-border text-info" role="status"></div>
-                        <span class="ms-2">Generating reasoning...</span>
-                    </div>
-                </div>
-
-                <div class="mb-3">
-                    <label for="timestamp" class="form-label">Timestamp</label>
-                    <input type="text" class="form-control" id="timestamp" name="timestamp"
-                        value="{{ product.timestamp }}" readonly>
-                </div>
-
                 <div class="d-flex gap-3">
                     <button type="button" class="btn btn-warning" onclick="enableEditing()">✏️ Edit</button>
                     <button type="submit" class="btn btn-success d-none" id="saveBtn">💾 Save</button>
                     <a href="{{ url_for('database') }}" class="btn btn-secondary">← Back</a>
                 </div>
             </form>
+
+            <!-- LLM Reasoning Section -->
+            <div class="mt-4">
+                <h6>🤖 LLM Reasoning</h6>
+                <div class="mb-2">
+                    <label for="timestampSelect" class="form-label">Select Timestamp</label>
+                    <select id="timestampSelect" class="form-select">
+                        {% for ts in product.image_history.keys() %}
+                        <option value="{{ ts }}">{{ ts }}</option>
+                        {% endfor %}
+                    </select>
+                    <span id="statusDisplay" class="badge ms-2 {% if product.status_by_timestamp[product.image_history.keys()|list|first] == 'cracked' %}bg-danger{% elif product.status_by_timestamp[product.image_history.keys()|list|first] == 'normal' %}bg-success{% else %}bg-warning{% endif %}">
+                        {{ product.status_by_timestamp[product.image_history.keys()|list|first] }}
+                    </span>
+                </div>
+                <div id="reasoningBox" class="border rounded p-3 bg-light" style="min-height: 100px;">
+                    <div id="reasoningText" style="white-space: pre-wrap;">Select a timestamp to view reasoning.</div>
+                </div>
+                <button id="generateReasoningBtn" class="btn btn-info btn-sm mt-2" style="display:none;">Generate Reasoning</button>
+                <div id="reasoningSpinner" class="mt-2" style="display:none;">
+                    <div class="spinner-border text-info" role="status"></div>
+                    <span class="ms-2">Generating reasoning...</span>
+                </div>
+            </div>
         </div>
     </div>
     {% else %}
@@ -147,72 +169,88 @@
     {% endif %}
 </div>
 
-<!-- JavaScript to enable editing -->
+<!-- JavaScript to enable editing and LLM reasoning -->
 <script>
+    const imageHistory = {{ product.image_history | tojson | safe }};
+    const thermalHistory = {{ product.thermal_history | tojson | safe }};
     function enableEditing() {
         const form = document.getElementById('productForm');
-        form.querySelectorAll('input:not([readonly]), textarea').forEach(field => {
+        form.querySelectorAll('input:not([readonly])').forEach(field => {
             field.removeAttribute('disabled');
         });
         document.getElementById('saveBtn').classList.remove('d-none');
     }
 
-    function generateReasoning() {
-        const btn = document.getElementById('generateReasoningBtn');
-        const spinner = document.getElementById('reasoningSpinner');
-        btn.disabled = true;
-        spinner.style.display = 'block';
-        fetch(`/generate_reasoning/{{ product.serial_number }}`, { method: 'POST' })
+    function updateStatusDisplay(ts) {
+        const statusDisplay = document.getElementById('statusDisplay');
+        statusDisplay.textContent = 'Loading...';
+        fetch(`/get_status/{{ product.serial_number }}/${ts}`)
             .then(response => response.json())
             .then(data => {
-                document.getElementById('reasoning').value = data.reasoning;
-                spinner.style.display = 'none';
-                btn.disabled = false;
+                const status = data.status || 'unknown';
+                statusDisplay.textContent = status;
+                statusDisplay.className = 'badge ms-2 ' + (status === 'cracked' ? 'bg-danger' : (status === 'normal' ? 'bg-success' : 'bg-warning'));
             })
             .catch(err => {
-                alert('Failed to generate reasoning.');
-                spinner.style.display = 'none';
-                btn.disabled = false;
+                statusDisplay.textContent = 'unknown';
+                statusDisplay.className = 'badge ms-2 bg-warning';
             });
     }
 
-    // Image upload functionality
-    document.getElementById('imageUploadForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const formData = new FormData();
-        const fileInput = document.getElementById('imageFile');
-        const uploadSpinner = document.getElementById('uploadSpinner');
-        
-        if (fileInput.files.length === 0) {
-            alert('Please select an image file.');
-            return;
-        }
-        
-        formData.append('image', fileInput.files[0]);
-        uploadSpinner.style.display = 'block';
-        
-        fetch(`/upload_image/{{ product.serial_number }}`, {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            uploadSpinner.style.display = 'none';
-            if (data.success) {
-                alert('Image uploaded successfully!');
-                location.reload(); // Refresh to show new image
-            } else {
-                alert('Upload failed: ' + data.error);
-            }
-        })
-        .catch(err => {
-            uploadSpinner.style.display = 'none';
-            alert('Upload failed: ' + err.message);
-        });
+    function fetchReasoningForTimestamp(ts) {
+        const reasoningBox = document.getElementById('reasoningBox');
+        const reasoningText = document.getElementById('reasoningText');
+        const spinner = document.getElementById('reasoningSpinner');
+        const generateBtn = document.getElementById('generateReasoningBtn');
+        spinner.style.display = 'block';
+        reasoningText.textContent = 'Loading...';
+        fetch(`/get_reasoning/{{ product.serial_number }}/${ts}`)
+            .then(response => response.json())
+            .then(data => {
+                spinner.style.display = 'none';
+                reasoningText.textContent = data.reasoning || data.message || 'No reasoning available.';
+                generateBtn.style.display = 'inline-block';
+            })
+            .catch(err => {
+                spinner.style.display = 'none';
+                reasoningText.textContent = 'Failed to load reasoning.';
+            });
+    }
+
+    document.getElementById('timestampSelect').addEventListener('change', function() {
+        fetchReasoningForTimestamp(this.value);
+        updateStatusDisplay(this.value);
     });
-
-
+    // On page load, fetch for the first timestamp if available
+    const tsSelect = document.getElementById('timestampSelect');
+    if (tsSelect && tsSelect.value) {
+        fetchReasoningForTimestamp(tsSelect.value);
+        updateStatusDisplay(tsSelect.value);
+    }
+    // Generate reasoning button
+    document.getElementById('generateReasoningBtn').addEventListener('click', function() {
+        const ts = document.getElementById('timestampSelect').value;
+        const spinner = document.getElementById('reasoningSpinner');
+        const reasoningText = document.getElementById('reasoningText');
+        spinner.style.display = 'block';
+        reasoningText.textContent = 'Generating...';
+        fetch(`/generate_reasoning/{{ product.serial_number }}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timestamp: ts })
+        })
+            .then(response => response.json())
+            .then(data => {
+                spinner.style.display = 'none';
+                reasoningText.textContent = data.reasoning || 'No reasoning available.';
+                // Optionally, refresh after generation
+                fetchReasoningForTimestamp(ts);
+            })
+            .catch(err => {
+                spinner.style.display = 'none';
+                reasoningText.textContent = 'Failed to generate reasoning.';
+            });
+    });
 </script>
 
 {% endblock %}
