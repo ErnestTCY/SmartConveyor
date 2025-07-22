@@ -630,8 +630,6 @@ def update_all_products_thermal_data() -> None:
     # Save back to disk only once, and only if something actually changed
     if changed:
         save_products(products)
-=======
->>>>>>> 3c737dc4911433e3240fe60023e1ce8c4b0943ea
 # === Flask Routes ===
 @app.route('/')
 def home():
@@ -1087,19 +1085,6 @@ def upload_yolo_images():
             "serial_number": serial_number,
             "model_name": model_name
         })
-        product["timestamp"] = timestamp
-        product["image_path"] = image_path
-        product["status"] = "unknown"
-        product["model_name"] = model_name
-    else:
-        new_product = {
-            "serial_number": serial_number,
-            "timestamp": timestamp,
-            "status": "unknown yet",
-            "model_name": "unknown yet",
-            "image_path": image_path
-        }
-        products.append(new_product)
 
     save_products(products)
 
