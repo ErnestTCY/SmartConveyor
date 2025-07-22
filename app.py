@@ -18,6 +18,8 @@ import base64
 import logging
 import time
 import socket
+from pathlib import Path  
+
 # === App Setup ===
 app = Flask(__name__, template_folder='templates/htmls', static_folder='static')
 load_dotenv()
@@ -570,6 +572,61 @@ def update_all_products_status_by_timestamp():
     if changed:
         save_products(products)
 
+def update_all_products_thermal_data() -> None:
+    """
+    Walk every   static/product_images/<serial>/<timestamp>/thermal/area*.json
+    and copy each file’s `raw_grid` into
+
+        product["thermal_by_timestamp"][<timestamp>][<area>] = raw_grid
+
+    • Creates the nested dictionaries on demand.
+    • Writes to Database/products.json only when at least one new
+      grid is added or an existing grid is updated.
+    """
+    products = load_products()
+    changed = False
+
+    root_dir = Path("static") / "product_images"
+
+    for product in products:
+        serial = product.get("serial_number")
+        if not serial:
+            continue
+
+        serial_path = root_dir / serial
+        if not serial_path.is_dir():
+            continue
+
+        # ── iterate over each timestamp folder ──────────────────────────
+        for ts_dir in serial_path.iterdir():
+            if not ts_dir.is_dir():
+                continue
+
+            thermal_dir = ts_dir / "thermal"
+            if not thermal_dir.is_dir():
+                continue
+
+            # ── read every area*.json inside the thermal folder ────────
+            for jf in thermal_dir.glob("area*.json"):
+                area_name = jf.stem            # e.g.  "area1"
+                try:
+                    raw_grid = json.loads(jf.read_text())["raw_grid"]
+                except Exception:
+                    # corrupt or malformed file – skip it gracefully
+                    continue
+
+                # Ensure nested dicts exist
+                ts_dict   = product.setdefault("thermal_by_timestamp", {}) \
+                                        .setdefault(ts_dir.name, {})
+
+                # Add / update only if different or missing
+                if area_name not in ts_dict or ts_dict[area_name] != raw_grid:
+                    ts_dict[area_name] = raw_grid
+                    changed = True
+
+    # Save back to disk only once, and only if something actually changed
+    if changed:
+        save_products(products)
 # === Flask Routes ===
 @app.route('/')
 def home():
@@ -578,6 +635,7 @@ def home():
 @app.route('/analytics')
 def analytics():
     update_all_products_status_by_timestamp()  # Ensure status_by_timestamp is up to date
+    update_all_products_thermal_data()
     return render_template('analytics.html')
 
 @app.route('/livestream')
@@ -951,12 +1009,28 @@ def upload_yolo_images():
         elif key == "thermal":
             thermal_dir = os.path.join(product_dir, "thermal")
             os.makedirs(thermal_dir, exist_ok=True)
+
             thermal_path = os.path.join(thermal_dir, filename)
-            if os.path.exists(thermal_path):
-                print(f"[SKIPPED] Image already exists: {filename}")
-            else:
-                with open(thermal_path, 'wb') as f:
-                    f.write(img_bytes)
+            with open(thermal_path, "wb") as f:
+                f.write(base64.b64decode(img_b64))
+
+            # save the raw grid right beside the image  ▼▼
+            grid = img_info.get("raw_grid")
+            if grid:
+                loc_num   = os.path.splitext(filename)[0].split("_")[2]
+                json_name = f"area{loc_num}.json"
+                json_path = os.path.join(thermal_dir, json_name)
+                with open(json_path, "w") as jf:
+                    json.dump(
+                        {
+                            "serial_number": serial_number,
+                            "timestamp": timestamp,
+                            "raw_grid": grid,
+                        },
+                        jf,
+                        indent=2,
+                    )
+
             saved_files.append(thermal_path)
             received_filenames.append(filename)
 
@@ -992,19 +1066,14 @@ def upload_yolo_images():
     image_path = f"product_images/{serial_number}/{timestamp}/{yolo_thermal_filenames[0]}" if yolo_thermal_filenames else ""
 
     if product:
-        product["timestamp"] = timestamp
-        product["image_path"] = image_path
-        product["status"] = "unknown"
-        product["model_name"] = model_name
+        # update model_name if caller supplied one
+        if model_name and product.get("model_name") != model_name:
+            product["model_name"] = model_name
     else:
-        new_product = {
+        products.append({
             "serial_number": serial_number,
-            "timestamp": timestamp,
-            "status": "unknown yet",
-            "model_name": "unknown yet",
-            "image_path": image_path
-        }
-        products.append(new_product)
+            "model_name": model_name
+        })
 
     save_products(products)
 
@@ -1084,4 +1153,4 @@ if __name__ == "__main__":
     host_ip = socket.gethostbyname(socket.gethostname())
     port = 5000
     print(f"\n============================================\nServer running at: http://{host_ip}:{port}\n============================================\n")
-    app.run(host="0.0.0.0", port=port, debug=True) 
+    app.run(host="0.0.0.0", port=port, debug=False) 
