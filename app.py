@@ -1100,7 +1100,6 @@ def upload_yolo_images():
             "image_path": image_path
         }
         products.append(new_product)
->>>>>>> 3c737dc4911433e3240fe60023e1ce8c4b0943ea
 
     save_products(products)
 
