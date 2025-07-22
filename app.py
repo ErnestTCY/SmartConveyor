@@ -18,7 +18,9 @@ import base64
 import logging
 import time
 import socket
+
 from pathlib import Path  
+
 
 # === App Setup ===
 app = Flask(__name__, template_folder='templates/htmls', static_folder='static')
@@ -572,6 +574,7 @@ def update_all_products_status_by_timestamp():
     if changed:
         save_products(products)
 
+
 def update_all_products_thermal_data() -> None:
     """
     Walk every   static/product_images/<serial>/<timestamp>/thermal/area*.json
@@ -627,6 +630,8 @@ def update_all_products_thermal_data() -> None:
     # Save back to disk only once, and only if something actually changed
     if changed:
         save_products(products)
+=======
+>>>>>>> 3c737dc4911433e3240fe60023e1ce8c4b0943ea
 # === Flask Routes ===
 @app.route('/')
 def home():
@@ -636,6 +641,7 @@ def home():
 def analytics():
     update_all_products_status_by_timestamp()  # Ensure status_by_timestamp is up to date
     update_all_products_thermal_data()
+
     return render_template('analytics.html')
 
 @app.route('/livestream')
@@ -1031,6 +1037,13 @@ def upload_yolo_images():
                         indent=2,
                     )
 
+
+            thermal_path = os.path.join(thermal_dir, filename)
+            if os.path.exists(thermal_path):
+                print(f"[SKIPPED] Image already exists: {filename}")
+            else:
+                with open(thermal_path, 'wb') as f:
+                    f.write(img_bytes)
             saved_files.append(thermal_path)
             received_filenames.append(filename)
 
@@ -1074,6 +1087,20 @@ def upload_yolo_images():
             "serial_number": serial_number,
             "model_name": model_name
         })
+        product["timestamp"] = timestamp
+        product["image_path"] = image_path
+        product["status"] = "unknown"
+        product["model_name"] = model_name
+    else:
+        new_product = {
+            "serial_number": serial_number,
+            "timestamp": timestamp,
+            "status": "unknown yet",
+            "model_name": "unknown yet",
+            "image_path": image_path
+        }
+        products.append(new_product)
+>>>>>>> 3c737dc4911433e3240fe60023e1ce8c4b0943ea
 
     save_products(products)
 
@@ -1154,3 +1181,4 @@ if __name__ == "__main__":
     port = 5000
     print(f"\n============================================\nServer running at: http://{host_ip}:{port}\n============================================\n")
     app.run(host="0.0.0.0", port=port, debug=False) 
+
