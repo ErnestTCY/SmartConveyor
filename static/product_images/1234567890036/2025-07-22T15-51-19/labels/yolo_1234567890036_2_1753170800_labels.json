@@ -1,0 +1,25 @@
+{
+  "image_filename": "yolo_1234567890036_2_1753170800.jpg",
+  "timestamp": "2025-07-22T15:53:27.190383",
+  "detections": [
+    {
+      "class": "crack",
+      "confidence": 0.55,
+      "position": {
+        "x": 68,
+        "y": 433
+      },
+      "size": {
+        "width": 7,
+        "height": 19
+      },
+      "bbox": [
+        68.6857681274414,
+        433.19140625,
+        76.20077514648438,
+        452.7403259277344
+      ]
+    }
+  ],
+  "total_detections": 1
+}

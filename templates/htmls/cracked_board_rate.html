@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block title %}Cracked Board Rate | T4G Dashboard{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="text-center mb-4">📊 Cracked Board Rate Analytics</h2>
+
+  <!-- Summary Cards -->
+  <div class="row text-center mb-4">
+    <div class="col-md-4 mb-3">
+      <div class="card border-primary shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Total Boards</h5>
+          <h3 id="totalBoards" class="text-primary fw-bold">--</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 mb-3">
+      <div class="card border-danger shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Cracked Boards</h5>
+          <h3 id="crackedBoards" class="text-danger fw-bold">--</h3>
+          <small id="crackedPercent" class="text-muted">(%)</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 mb-3">
+      <div class="card border-success shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Healthy Boards</h5>
+          <h3 id="healthyBoards" class="text-success fw-bold">--</h3>
+          <small id="healthyPercent" class="text-muted">(%)</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unknown Status Card -->
+  <div class="row text-center mb-4">
+    <div class="col-md-6 offset-md-3">
+      <div class="card border-secondary shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Unknown Status</h5>
+          <h3 id="unknownBoards" class="text-secondary fw-bold">--</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pie Chart -->
+  <div class="row mb-5">
+    <div class="col-md-8 offset-md-2">
+      <canvas id="statusChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Back Button -->
+  <div class="text-center">
+    <a href="{{ url_for('analytics') }}" class="btn btn-outline-secondary">← Back to Dashboard</a>
+  </div>
+</div>
+
+<!-- Chart.js Script -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  fetch('/api/analytics_data')
+    .then(res => res.json())
+    .then(data => {
+      // Update numbers
+      document.getElementById("totalBoards").textContent = data.total_boards;
+      document.getElementById("crackedBoards").textContent = data.cracked_boards;
+      document.getElementById("healthyBoards").textContent = data.healthy_boards;
+      document.getElementById("unknownBoards").textContent = data.unknown_boards;
+      document.getElementById("crackedPercent").textContent = `(${data.cracked_percent}%)`;
+      document.getElementById("healthyPercent").textContent = `(${data.healthy_percent}%)`;
+
+      // Chart
+      const ctx = document.getElementById('statusChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: ['Cracked', 'Healthy', 'Unknown'],
+          datasets: [{
+            data: [
+              data.cracked_boards,
+              data.healthy_boards,
+              data.unknown_boards
+            ],
+            backgroundColor: ['#dc3545', '#198754', '#6c757d'],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { position: 'bottom' },
+            title: { display: true, text: 'Board Status Distribution' }
+          }
+        }
+      });
+    })
+    .catch(err => {
+      console.error("❌ Failed to load analytics data:", err);
+    });
+</script>
+{% endblock %}

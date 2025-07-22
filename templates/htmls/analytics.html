@@ -28,14 +28,16 @@
     </div>
   </div>
   <div class="col-md-4 mb-4">
-    <div class="card h-100 shadow border-0">
-      <div class="card-body">
-        <h5 class="card-title"><i class="bi bi-exclamation-triangle"></i> Cracked Boards Rate</h5>
-        <canvas id="crackGauge"></canvas>
-        <div id="crackGaugeLabel" class="mt-2 fw-bold text-center"></div>
+    <a href="{{ url_for('cracked_board_rate') }}" class="text-decoration-none text-dark">
+      <div class="card h-100 shadow border-0 hover-shadow">
+        <div class="card-body">
+          <h5 class="card-title"><i class="bi bi-exclamation-triangle"></i> Cracked Boards Rate</h5>
+          <canvas id="crackGauge"></canvas>
+          <div id="crackGaugeLabel" class="mt-2 fw-bold text-center"></div>
+        </div>
       </div>
-    </div>
-  </div>
+    </a>
+  </div>  
   <div class="col-md-4 mb-4">
     <div class="card h-100 shadow border-0">
       <div class="card-body">

@@ -1110,6 +1110,41 @@ def upload_yolo_images():
 
     return jsonify({'success': True, 'saved': saved_files})
 
+@app.route('/cracked_board_rate')
+def cracked_board_rate():
+    try:
+        with open('Database/products.json') as f:
+            data = json.load(f)
+
+        cracked_boards = 0
+        tot_boards = len(data)
+
+        for board in data:
+            cracked = False
+            for timestamp, areas in board.get("thermal_by_timestamp", {}).items():
+                for area_values in areas.values():
+                    for row in area_values:
+                        if any(temp >= 30.0 for temp in row):  # threshold for "crack"
+                            cracked = True
+                            break
+                    if cracked:
+                        break
+                if cracked:
+                    break
+            if cracked:
+                cracked_boards += 1
+
+        crack_rate = round((cracked_boards / tot_boards) * 100, 2) if tot_boards > 0 else 0
+
+        return render_template(
+            'cracked_board_rate.html',
+            cracked=cracked_boards,
+            total=tot_boards,
+            rate=crack_rate
+        )
+    except Exception as e:
+        return f"Error reading product data: {e}", 500
+    return render_template('cracked_board_rate.html')
 
 @app.route('/api/analytics_data')
 def analytics_data():
@@ -1119,46 +1154,63 @@ def analytics_data():
         total_boards = len(products)
         cracked_boards = 0
         healthy_boards = 0
+        scratch_boards = 0
         unknown_boards = 0
         total_images = 0
         images_per_board = []
         status_counts = {}
 
         for product in products:
-            status = product.get('status', '').lower()
-            if 'crack' in status:
+            status_by_ts = product.get('status_by_timestamp', {})
+            if status_by_ts:
+                # Get the latest timestamp's status
+                latest_timestamp = max(status_by_ts.keys(), default=None)
+                final_status = status_by_ts.get(latest_timestamp, '').lower() if latest_timestamp else ''
+            else:
+                final_status = ''
+
+            # Classify final status
+            if final_status == 'cracked':
                 cracked_boards += 1
-            elif 'healthy' in status or 'ok' in status:
+            elif final_status == 'normal':
                 healthy_boards += 1
+            elif final_status == 'scratch':
+                scratch_boards += 1
             else:
                 unknown_boards += 1
-            # Count images
+
+            # Count images per board
             serial_number = product.get('serial_number')
             if serial_number:
                 image_history = get_product_image_history(serial_number)
                 num_images = sum(len(imgs) for imgs in image_history.values())
                 images_per_board.append(num_images)
                 total_images += num_images
-            # Count status
-            status_counts[status] = status_counts.get(status, 0) + 1
+
+            # Count full status appearance
+            status_counts[final_status] = status_counts.get(final_status, 0) + 1
 
         avg_images_per_board = round(total_images / total_boards, 2) if total_boards else 0
         cracked_percent = round((cracked_boards / total_boards) * 100, 2) if total_boards else 0
         healthy_percent = round((healthy_boards / total_boards) * 100, 2) if total_boards else 0
+        scratch_percent = round((scratch_boards / total_boards) * 100, 2) if total_boards else 0
 
         return jsonify({
             'total_boards': total_boards,
             'cracked_boards': cracked_boards,
             'healthy_boards': healthy_boards,
+            'scratch_boards': scratch_boards,
             'unknown_boards': unknown_boards,
             'avg_images_per_board': avg_images_per_board,
             'total_images': total_images,
             'cracked_percent': cracked_percent,
             'healthy_percent': healthy_percent,
+            'scratch_percent': scratch_percent,
             'status_counts': status_counts
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 if __name__ == "__main__":
     host_ip = socket.gethostbyname(socket.gethostname())

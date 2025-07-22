@@ -1,0 +1,25 @@
+{
+  "image_filename": "yolo_1234567890005_2_1753168552.jpg",
+  "timestamp": "2025-07-22T15:15:53.164486",
+  "detections": [
+    {
+      "class": "solarboard",
+      "confidence": 0.83,
+      "position": {
+        "x": 2,
+        "y": 136
+      },
+      "size": {
+        "width": 632,
+        "height": 343
+      },
+      "bbox": [
+        2.347914695739746,
+        136.0647430419922,
+        635.0453491210938,
+        480.0
+      ]
+    }
+  ],
+  "total_detections": 1
+}
