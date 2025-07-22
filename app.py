@@ -729,30 +729,6 @@ def database():
             product["status"] = 'unknown'
     return render_template('database.html', products=products)
 
-from flask import (
-    Flask, render_template, request,
-    redirect, url_for, abort
-)
-import json
-from collections import Counter
-
-
-DATA_FILE = 'Database/products.json'
-
-def load_products():
-    with open(DATA_FILE) as f:
-        return json.load(f)
-
-def save_products(products):
-    with open(DATA_FILE, 'w') as f:
-        json.dump(products, f, indent=2)
-
-# (Assumes you already have these helpers defined)
-# get_latest_images_for_product(serial) -> List[str]
-# get_product_image_history(serial)       -> Dict[timestamp, List[str]]
-# get_product_thermal_history(serial)     -> Dict[timestamp, Dict[area, Grid]]
-# load_status(serial, timestamp)          -> str
-# get_latest_timestamp_directory(serial)  -> str
 
 @app.route('/product/<serial_number>', methods=['GET','POST'])
 def product_detail(serial_number):
