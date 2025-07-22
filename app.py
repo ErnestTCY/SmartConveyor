@@ -12,6 +12,7 @@ import paho.mqtt.client as mqtt
 import google.generativeai as genai
 from dotenv import load_dotenv
 from datetime import datetime
+from datetime import datetime, timedelta
 import glob
 import requests
 import base64
@@ -431,7 +432,11 @@ def generate_gemini_reasoning(product, timestamp=None):
 DATA_FILE = 'Database/products.json'
 def load_products():
     with open(DATA_FILE, 'r') as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Malformed JSON in {DATA_FILE}: {e}")
+
 def save_products(products):
     with open(DATA_FILE, 'w') as f:
         json.dump(products, f, indent=2)
@@ -545,7 +550,11 @@ def save_yolo_labels(serial_number, timestamp_dir, image_filename, results):
     return label_path
 
 def update_all_products_status_by_timestamp():
-    products = load_products()
+    try:
+        products = load_products()
+    except FileNotFoundError:
+        products = []
+
     changed = False
     for product in products:
         serial_number = product.get("serial_number")
@@ -586,7 +595,10 @@ def update_all_products_thermal_data() -> None:
     • Writes to Database/products.json only when at least one new
       grid is added or an existing grid is updated.
     """
-    products = load_products()
+    try:
+        products = load_products()
+    except FileNotFoundError:
+        products = []
     changed = False
 
     root_dir = Path("static") / "product_images"
@@ -699,7 +711,10 @@ def send_mqtt():
 
 @app.route('/database')
 def database():
-    products = load_products()
+    try:
+        products = load_products()
+    except FileNotFoundError:
+        products = []
     for product in products:
         serial_number = product["serial_number"]
         latest_timestamp = get_latest_timestamp_directory(serial_number)
@@ -716,7 +731,10 @@ def database():
 
 @app.route('/product/<serial_number>', methods=['GET', 'POST'])
 def product_detail(serial_number):
-    products = load_products()
+    try:
+        products = load_products()
+    except FileNotFoundError:
+        products = []
     product = next((p for p in products if p["serial_number"] == serial_number), None)
     if not product:
         return "Product not found", 404
@@ -753,7 +771,10 @@ def product_detail(serial_number):
 
 @app.route('/generate_reasoning/<serial_number>', methods=['POST'])
 def generate_reasoning(serial_number):
-    products = load_products()
+    try:
+        products = load_products()
+    except FileNotFoundError:
+        products = []
     product = next((p for p in products if p["serial_number"] == serial_number), None)
     if not product:
         return {"error": "Product not found"}, 404
@@ -1109,7 +1130,6 @@ def upload_yolo_images():
                 print(f"[SKIPPED] Label already exists for {filename}")
 
     return jsonify({'success': True, 'saved': saved_files})
-
 @app.route('/cracked_board_rate')
 def cracked_board_rate():
     try:
@@ -1146,6 +1166,7 @@ def cracked_board_rate():
         return f"Error reading product data: {e}", 500
     return render_template('cracked_board_rate.html')
 
+
 @app.route('/api/analytics_data')
 def analytics_data():
     """API endpoint to provide business analytics for solar board statistics."""
@@ -1162,24 +1183,24 @@ def analytics_data():
 
         for product in products:
             status_by_ts = product.get('status_by_timestamp', {})
-            if status_by_ts:
-                # Get the latest timestamp's status
-                latest_timestamp = max(status_by_ts.keys(), default=None)
-                final_status = status_by_ts.get(latest_timestamp, '').lower() if latest_timestamp else ''
-            else:
-                final_status = ''
+            # Look at every recorded status in history
+            statuses = [s.lower() for s in status_by_ts.values()]
 
-            # Classify final status
-            if final_status == 'cracked':
+            # Classify the board based on its full history
+            if 'cracked' in statuses:
+                classification = 'cracked'
                 cracked_boards += 1
-            elif final_status == 'normal':
-                healthy_boards += 1
-            elif final_status == 'scratch':
+            elif 'scratch' in statuses:
+                classification = 'scratch'
                 scratch_boards += 1
+            elif 'normal' in statuses:
+                classification = 'normal'
+                healthy_boards += 1
             else:
+                classification = 'unknown'
                 unknown_boards += 1
 
-            # Count images per board
+            # Count images per board (unchanged)
             serial_number = product.get('serial_number')
             if serial_number:
                 image_history = get_product_image_history(serial_number)
@@ -1187,29 +1208,31 @@ def analytics_data():
                 images_per_board.append(num_images)
                 total_images += num_images
 
-            # Count full status appearance
-            status_counts[final_status] = status_counts.get(final_status, 0) + 1
+            # Tally how many boards fell into each category
+            status_counts[classification] = status_counts.get(classification, 0) + 1
 
+        # Compute averages and percentages
         avg_images_per_board = round(total_images / total_boards, 2) if total_boards else 0
         cracked_percent = round((cracked_boards / total_boards) * 100, 2) if total_boards else 0
         healthy_percent = round((healthy_boards / total_boards) * 100, 2) if total_boards else 0
         scratch_percent = round((scratch_boards / total_boards) * 100, 2) if total_boards else 0
 
         return jsonify({
-            'total_boards': total_boards,
-            'cracked_boards': cracked_boards,
-            'healthy_boards': healthy_boards,
-            'scratch_boards': scratch_boards,
-            'unknown_boards': unknown_boards,
+            'total_boards':      total_boards,
+            'cracked_boards':    cracked_boards,
+            'healthy_boards':    healthy_boards,
+            'scratch_boards':    scratch_boards,
+            'unknown_boards':    unknown_boards,
             'avg_images_per_board': avg_images_per_board,
-            'total_images': total_images,
-            'cracked_percent': cracked_percent,
-            'healthy_percent': healthy_percent,
-            'scratch_percent': scratch_percent,
-            'status_counts': status_counts
+            'total_images':      total_images,
+            'cracked_percent':   cracked_percent,
+            'healthy_percent':   healthy_percent,
+            'scratch_percent':   scratch_percent,
+            'status_counts':     status_counts
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 
 if __name__ == "__main__":
