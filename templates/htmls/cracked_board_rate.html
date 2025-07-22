@@ -1,49 +1,14 @@
 {% extends 'base.html' %}
 {% block title %}Cracked Board Rate | T4G Dashboard{% endblock %}
+
 {% block content %}
 <div class="container py-4">
   <h2 class="text-center mb-4">📊 Cracked Board Rate Analytics</h2>
 
-  <!-- Summary Cards -->
-  <div class="row text-center mb-4">
-    <div class="col-md-4 mb-3">
-      <div class="card border-primary shadow-sm">
-        <div class="card-body">
-          <h5 class="card-title">Total Boards</h5>
-          <h3 id="totalBoards" class="text-primary fw-bold">--</h3>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4 mb-3">
-      <div class="card border-danger shadow-sm">
-        <div class="card-body">
-          <h5 class="card-title">Cracked Boards</h5>
-          <h3 id="crackedBoards" class="text-danger fw-bold">--</h3>
-          <small id="crackedPercent" class="text-muted">(%)</small>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4 mb-3">
-      <div class="card border-success shadow-sm">
-        <div class="card-body">
-          <h5 class="card-title">Healthy Boards</h5>
-          <h3 id="healthyBoards" class="text-success fw-bold">--</h3>
-          <small id="healthyPercent" class="text-muted">(%)</small>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Unknown Status Card -->
-  <div class="row text-center mb-4">
-    <div class="col-md-6 offset-md-3">
-      <div class="card border-secondary shadow-sm">
-        <div class="card-body">
-          <h5 class="card-title">Unknown Status</h5>
-          <h3 id="unknownBoards" class="text-secondary fw-bold">--</h3>
-        </div>
-      </div>
-    </div>
+  <!-- Status History Summary -->
+  <h4 class="mt-5 text-center">Status History Summary</h4>
+  <div class="row text-center mb-4" id="historySummary">
+    <!-- injected by JS -->
   </div>
 
   <!-- Pie Chart -->
@@ -53,53 +18,63 @@
     </div>
   </div>
 
-  <!-- Back Button -->
   <div class="text-center">
-    <a href="{{ url_for('analytics') }}" class="btn btn-outline-secondary">← Back to Dashboard</a>
+    <a href="{{ url_for('analytics') }}" class="btn btn-outline-secondary">
+      ← Back to Dashboard
+    </a>
   </div>
 </div>
+{% endblock %}
 
-<!-- Chart.js Script -->
+{% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-  fetch('/api/analytics_data')
-    .then(res => res.json())
-    .then(data => {
-      // Update numbers
-      document.getElementById("totalBoards").textContent = data.total_boards;
-      document.getElementById("crackedBoards").textContent = data.cracked_boards;
-      document.getElementById("healthyBoards").textContent = data.healthy_boards;
-      document.getElementById("unknownBoards").textContent = data.unknown_boards;
-      document.getElementById("crackedPercent").textContent = `(${data.cracked_percent}%)`;
-      document.getElementById("healthyPercent").textContent = `(${data.healthy_percent}%)`;
+fetch('/api/analytics_data')
+  .then(r => r.json())
+  .then(data => {
+    const hc       = data.history_counts || {};
+    const totalHist = Object.values(hc).reduce((sum, v) => sum + v, 0) || 1;
+    const row      = document.getElementById('historySummary');
+    row.innerHTML  = '';
 
-      // Chart
-      const ctx = document.getElementById('statusChart').getContext('2d');
-      new Chart(ctx, {
+    // inject per‑status summary cards
+    Object.entries(hc).forEach(([status, cnt]) => {
+      const pct = ((cnt / totalHist) * 100).toFixed(2);
+      row.insertAdjacentHTML('beforeend', `
+        <div class="col-md-3 mb-3">
+          <div class="card border-info shadow-sm">
+            <div class="card-body">
+              <h5>${status.charAt(0).toUpperCase() + status.slice(1)}</h5>
+              <h3>${cnt}</h3>
+              <small>${pct}%</small>
+            </div>
+          </div>
+        </div>
+      `);
+    });
+
+    // draw history pie chart
+    new Chart(
+      document.getElementById('statusChart').getContext('2d'),
+      {
         type: 'pie',
         data: {
-          labels: ['Cracked', 'Healthy', 'Unknown'],
-          datasets: [{
-            data: [
-              data.cracked_boards,
-              data.healthy_boards,
-              data.unknown_boards
-            ],
-            backgroundColor: ['#dc3545', '#198754', '#6c757d'],
-            borderWidth: 1
-          }]
+          labels: Object.keys(hc).map(s => s.charAt(0).toUpperCase() + s.slice(1)),
+          datasets: [{ data: Object.values(hc) }]
         },
         options: {
           responsive: true,
           plugins: {
             legend: { position: 'bottom' },
-            title: { display: true, text: 'Board Status Distribution' }
+            title: {
+              display: true,
+              text: 'Status History Distribution'
+            }
           }
         }
-      });
-    })
-    .catch(err => {
-      console.error("❌ Failed to load analytics data:", err);
-    });
+      }
+    );
+  })
+  .catch(err => console.error('❌ History load failed', err));
 </script>
 {% endblock %}

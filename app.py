@@ -12,14 +12,14 @@ import paho.mqtt.client as mqtt
 import google.generativeai as genai
 from dotenv import load_dotenv
 from datetime import datetime
-from datetime import datetime, timedelta
+from datetime import  timedelta
 import glob
 import requests
 import base64
 import logging
 import time
 import socket
-
+from collections import Counter
 from pathlib import Path  
 
 
@@ -729,45 +729,68 @@ def database():
             product["status"] = 'unknown'
     return render_template('database.html', products=products)
 
-@app.route('/product/<serial_number>', methods=['GET', 'POST'])
+from flask import (
+    Flask, render_template, request,
+    redirect, url_for, abort
+)
+import json
+from collections import Counter
+
+
+DATA_FILE = 'Database/products.json'
+
+def load_products():
+    with open(DATA_FILE) as f:
+        return json.load(f)
+
+def save_products(products):
+    with open(DATA_FILE, 'w') as f:
+        json.dump(products, f, indent=2)
+
+# (Assumes you already have these helpers defined)
+# get_latest_images_for_product(serial) -> List[str]
+# get_product_image_history(serial)       -> Dict[timestamp, List[str]]
+# get_product_thermal_history(serial)     -> Dict[timestamp, Dict[area, Grid]]
+# load_status(serial, timestamp)          -> str
+# get_latest_timestamp_directory(serial)  -> str
+
+@app.route('/product/<serial_number>', methods=['GET','POST'])
 def product_detail(serial_number):
-    try:
-        products = load_products()
-    except FileNotFoundError:
-        products = []
-    product = next((p for p in products if p["serial_number"] == serial_number), None)
+    products = load_products()
+    product = next((p for p in products if p['serial_number'] == serial_number), None)
     if not product:
-        return "Product not found", 404
-    # Get latest images for the product
-    latest_images = get_latest_images_for_product(serial_number)
-    product["images"] = latest_images
-    # Get image history for the product
-    image_history = get_product_image_history(serial_number)
-    product["image_history"] = image_history
-    # Get thermal image history for the product
-    thermal_history = {}
-    for ts in image_history.keys():
-        imgs = get_thermal_images_from_timestamp_directory(serial_number, ts)
-        if imgs is None:
-            imgs = []
-        thermal_history[ts] = imgs
-    product["thermal_history"] = thermal_history
-    # Set status for each timestamp in image_history
-    product["status_by_timestamp"] = {}
-    for ts in image_history.keys():
-        product["status_by_timestamp"][ts] = load_status(serial_number, ts)
-    # Set status for latest timestamp
-    latest_timestamp = get_latest_timestamp_directory(serial_number)
-    if latest_timestamp:
-        product["status"] = load_status(serial_number, latest_timestamp)
-    else:
-        product["status"] = 'unknown'
+        abort(404)
+
+    # —— Gather display‑only data, but DON'T assign into product dict —— #
+    latest_images       = get_latest_images_for_product(serial_number)
+    image_history       = get_product_image_history(serial_number)
+    thermal_history     = get_product_thermal_history(serial_number)
+    status_by_timestamp = {
+        ts: load_status(serial_number, ts)
+        for ts in image_history.keys()
+    }
+    latest_ts = get_latest_timestamp_directory(serial_number)
+    current_status = (
+        load_status(serial_number, latest_ts)
+        if latest_ts else 'unknown'
+    )
+
     if request.method == 'POST':
-        product["model_name"] = request.form["model_name"]
-        product["status"] = request.form["status"]
+        # Only persist model_name changes:
+        product['model_name'] = request.form['model_name']
         save_products(products)
         return redirect(url_for('product_detail', serial_number=serial_number))
-    return render_template('product.html', product=product)
+
+    return render_template(
+        'product.html',
+        product=product,
+        latest_images=latest_images,
+        image_history=image_history,
+        thermal_history=thermal_history,
+        status_by_timestamp=status_by_timestamp,
+        status=current_status
+    )
+
 
 @app.route('/generate_reasoning/<serial_number>', methods=['POST'])
 def generate_reasoning(serial_number):
@@ -1130,108 +1153,86 @@ def upload_yolo_images():
                 print(f"[SKIPPED] Label already exists for {filename}")
 
     return jsonify({'success': True, 'saved': saved_files})
+
 @app.route('/cracked_board_rate')
 def cracked_board_rate():
     try:
-        with open('Database/products.json') as f:
+        with open(DATA_FILE) as f:
             data = json.load(f)
 
         cracked_boards = 0
         tot_boards = len(data)
-
         for board in data:
-            cracked = False
-            for timestamp, areas in board.get("thermal_by_timestamp", {}).items():
-                for area_values in areas.values():
-                    for row in area_values:
-                        if any(temp >= 30.0 for temp in row):  # threshold for "crack"
-                            cracked = True
-                            break
-                    if cracked:
-                        break
-                if cracked:
-                    break
-            if cracked:
+            # any thermal cell ≥30°C → cracked
+            if any(
+                temp >= 30.0
+                for areas in board.get("thermal_by_timestamp", {}).values()
+                for rows in areas.values()
+                for row in rows
+                for temp in row
+            ):
                 cracked_boards += 1
 
-        crack_rate = round((cracked_boards / tot_boards) * 100, 2) if tot_boards > 0 else 0
+        crack_rate = round((cracked_boards / tot_boards) * 100, 2) if tot_boards else 0
 
         return render_template(
             'cracked_board_rate.html',
+            # these Jinja vars are only fallback; our JS will re‑fetch live JSON
             cracked=cracked_boards,
             total=tot_boards,
             rate=crack_rate
         )
     except Exception as e:
         return f"Error reading product data: {e}", 500
-    return render_template('cracked_board_rate.html')
-
 
 @app.route('/api/analytics_data')
 def analytics_data():
-    """API endpoint to provide business analytics for solar board statistics."""
     try:
-        products = load_products()
+        with open(DATA_FILE) as f:
+            products = json.load(f)
         total_boards = len(products)
-        cracked_boards = 0
-        healthy_boards = 0
-        scratch_boards = 0
-        unknown_boards = 0
-        total_images = 0
-        images_per_board = []
+
         status_counts = {}
+        history_counts = Counter()
 
-        for product in products:
-            status_by_ts = product.get('status_by_timestamp', {})
-            # Look at every recorded status in history
-            statuses = [s.lower() for s in status_by_ts.values()]
-
-            # Classify the board based on its full history
-            if 'cracked' in statuses:
-                classification = 'cracked'
-                cracked_boards += 1
-            elif 'scratch' in statuses:
-                classification = 'scratch'
-                scratch_boards += 1
-            elif 'normal' in statuses:
-                classification = 'normal'
-                healthy_boards += 1
+        for p in products:
+            # classification by ever‑seen status
+            sts = [s.lower() for s in p.get('status_by_timestamp', {}).values()]
+            if 'cracked' in sts:
+                cls = 'cracked'
+            elif 'scratch' in sts:
+                cls = 'scratch'
+            elif 'normal' in sts:
+                cls = 'healthy'
             else:
-                classification = 'unknown'
-                unknown_boards += 1
+                cls = 'unknown'
+            status_counts[cls] = status_counts.get(cls, 0) + 1
+            history_counts.update(sts)
 
-            # Count images per board (unchanged)
-            serial_number = product.get('serial_number')
-            if serial_number:
-                image_history = get_product_image_history(serial_number)
-                num_images = sum(len(imgs) for imgs in image_history.values())
-                images_per_board.append(num_images)
-                total_images += num_images
+        c = status_counts.get
+        cracked  = c('cracked',  0)
+        scratch  = c('scratch',  0)
+        healthy  = c('healthy',  0)
+        unknown  = c('unknown',  0)
 
-            # Tally how many boards fell into each category
-            status_counts[classification] = status_counts.get(classification, 0) + 1
-
-        # Compute averages and percentages
-        avg_images_per_board = round(total_images / total_boards, 2) if total_boards else 0
-        cracked_percent = round((cracked_boards / total_boards) * 100, 2) if total_boards else 0
-        healthy_percent = round((healthy_boards / total_boards) * 100, 2) if total_boards else 0
-        scratch_percent = round((scratch_boards / total_boards) * 100, 2) if total_boards else 0
-
+        def pct(x): return round(x/total_boards*100,2) if total_boards else 0
         return jsonify({
-            'total_boards':      total_boards,
-            'cracked_boards':    cracked_boards,
-            'healthy_boards':    healthy_boards,
-            'scratch_boards':    scratch_boards,
-            'unknown_boards':    unknown_boards,
-            'avg_images_per_board': avg_images_per_board,
-            'total_images':      total_images,
-            'cracked_percent':   cracked_percent,
-            'healthy_percent':   healthy_percent,
-            'scratch_percent':   scratch_percent,
-            'status_counts':     status_counts
+            'total_boards':    total_boards,
+            'cracked_boards':  cracked,
+            'scratch_boards':  scratch,
+            'healthy_boards':  healthy,
+            'unknown_boards':  unknown,
+            'cracked_percent': pct(cracked),
+            'scratch_percent': pct(scratch),
+            'healthy_percent': pct(healthy),
+            'status_counts':   status_counts,
+            'history_counts':  dict(history_counts),
+            'defect_rate':     pct(cracked + scratch)
         })
     except Exception as e:
+        print("read error")
         return jsonify({'error': str(e)}), 500
+
 
 
 
@@ -1239,5 +1240,5 @@ if __name__ == "__main__":
     host_ip = socket.gethostbyname(socket.gethostname())
     port = 5000
     print(f"\n============================================\nServer running at: http://{host_ip}:{port}\n============================================\n")
-    app.run(host="0.0.0.0", port=port, debug=False) 
+    app.run(host="0.0.0.0", port=port, debug=True) 
 
