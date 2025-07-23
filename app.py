@@ -642,6 +642,14 @@ def update_all_products_thermal_data() -> None:
     # Save back to disk only once, and only if something actually changed
     if changed:
         save_products(products)
+def get_product_thermal_history(serial_number):
+    history = {}
+    for ts in get_all_timestamp_directories(serial_number):
+        imgs = get_thermal_images_from_timestamp_directory(serial_number, ts)
+        if imgs:
+            history[ts] = imgs
+    return history
+
 # === Flask Routes ===
 @app.route('/')
 def home():
@@ -730,14 +738,15 @@ def database():
     return render_template('database.html', products=products)
 
 
-@app.route('/product/<serial_number>', methods=['GET','POST'])
+@app.route('/product/<serial_number>', methods=['GET', 'POST'])
 def product_detail(serial_number):
+    # Load product list and find this one
     products = load_products()
     product = next((p for p in products if p['serial_number'] == serial_number), None)
     if not product:
         abort(404)
 
-    # —— Gather display‑only data, but DON'T assign into product dict —— #
+    # — Gather data —
     latest_images       = get_latest_images_for_product(serial_number)
     image_history       = get_product_image_history(serial_number)
     thermal_history     = get_product_thermal_history(serial_number)
@@ -751,21 +760,21 @@ def product_detail(serial_number):
         if latest_ts else 'unknown'
     )
 
+    # — Handle form POST (only persist model_name) —
     if request.method == 'POST':
-        # Only persist model_name changes:
         product['model_name'] = request.form['model_name']
         save_products(products)
         return redirect(url_for('product_detail', serial_number=serial_number))
 
-    return render_template(
-        'product.html',
-        product=product,
-        latest_images=latest_images,
-        image_history=image_history,
-        thermal_history=thermal_history,
-        status_by_timestamp=status_by_timestamp,
-        status=current_status
-    )
+    # — Inject into product dict so your template’s product.* works —
+    product['images']               = latest_images
+    product['image_history']        = image_history
+    product['thermal_history']      = thermal_history
+    product['status_by_timestamp']  = status_by_timestamp
+    product['status']               = current_status
+
+    # — Render as before, passing only product —
+    return render_template('product.html', product=product)
 
 
 @app.route('/generate_reasoning/<serial_number>', methods=['POST'])
