@@ -3,7 +3,8 @@ import json
 import glob
 import uuid
 from datetime import datetime, timedelta
-
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
@@ -111,7 +112,13 @@ class PDFReport(FPDF):
 
         # Pie charts
         chart_id = str(uuid.uuid4())[:8]
-        if crack_pie_data:
+        # only draw if the total of the two slices is > 0 and both are real numbers
+        if (isinstance(crack_pie_data, (list,tuple)) 
+            and len(crack_pie_data)==2 
+            and all(isinstance(x,(int,float)) for x in crack_pie_data)
+            and sum(crack_pie_data)>0):
+
+
             crack_chart = f"pie_crack_{chart_id}.png"
             generate_pie_chart(["Cracked", "Normal"], crack_pie_data,
                                "Crack Distribution", crack_chart)
@@ -129,12 +136,18 @@ class PDFReport(FPDF):
         self.ln(10)
 
         # Suggested solution
+             # Suggested solution
         if suggestion:
             self.set_font("Helvetica", 'B', 11)
             self.cell(0, 8, "Suggested Solution:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             self.set_font("Helvetica", '', 11)
-            self.multi_cell(0, 8, suggestion)
+
+            # sanitize any non‑Latin1 characters (e.g. “μ”) so Helvetica can render them
+            safe_suggestion = suggestion.encode('latin-1', errors='replace').decode('latin-1')
+            self.multi_cell(0, 8, safe_suggestion)
+
         self.ln(5)
+
 
     def product_section(self, panel):
         """

@@ -530,16 +530,22 @@ def update_status_json(serial_number, timestamp_dir):
     for label_file in glob.glob(os.path.join(labels_dir, '*_labels.json')):
         with open(label_file, 'r') as f:
             data = json.load(f)
-            for det in data.get('detections', []):
-                if 'crack' in str(det.get('class', '')).lower():
-                    status = 'cracked'
-                    break
+        for det in data.get('detections', []):
+            cls = str(det.get('class', '')).lower()
+            if 'crack' in cls:
+                status = 'cracked'
+                break
+            elif 'scratch' in cls:
+                status = 'scratch'
+                # keep scanning in case there is also a crack
         if status == 'cracked':
             break
+
     status_path = os.path.join('static', 'product_images', serial_number, timestamp_dir, 'status.json')
     with open(status_path, 'w') as f:
         json.dump({'status': status}, f)
     return status
+
 
 def load_status(serial_number, timestamp_dir):
     status_path = os.path.join('static', 'product_images', serial_number, timestamp_dir, 'status.json')
@@ -777,43 +783,39 @@ def database():
     return render_template('database.html', products=products)
 
 
-@app.route('/product/<serial_number>', methods=['GET', 'POST'])
+@app.route('/product/<serial_number>', methods=['GET','POST'])
 def product_detail(serial_number):
-    # Load product list and find this one
     products = load_products()
-    product = next((p for p in products if p['serial_number'] == serial_number), None)
+    product  = next((p for p in products if p.get('serial_number')==serial_number), None)
     if not product:
         abort(404)
 
-    # — Gather data —
-    latest_images       = get_latest_images_for_product(serial_number)
-    image_history       = get_product_image_history(serial_number)
-    thermal_history     = get_product_thermal_history(serial_number)
-    status_by_timestamp = {
-        ts: load_status(serial_number, ts)
-        for ts in image_history.keys()
-    }
-    latest_ts = get_latest_timestamp_directory(serial_number)
-    current_status = (
-        load_status(serial_number, latest_ts)
-        if latest_ts else 'unknown'
-    )
-
-    # — Handle form POST (only persist model_name) —
     if request.method == 'POST':
-        product['model_name'] = request.form['model_name']
-        save_products(products)
+        new_name = request.form.get('model_name','').strip()
+        if new_name:
+            product['model_name'] = new_name
+            save_products(products)
         return redirect(url_for('product_detail', serial_number=serial_number))
 
-    # — Inject into product dict so your template’s product.* works —
-    product['images']               = latest_images
-    product['image_history']        = image_history
-    product['thermal_history']      = thermal_history
-    product['status_by_timestamp']  = status_by_timestamp
-    product['status']               = current_status
+    # on GET, just read what's in products.json
+    latest_images      = get_latest_images_for_product(serial_number)
+    image_history      = get_product_image_history(serial_number)
+    thermal_history    = get_product_thermal_history(serial_number)
+    status_by_timestamp= product.get('status_by_timestamp', {})
+    current_status     = product.get('status', 'unknown')
 
-    # — Render as before, passing only product —
-    return render_template('product.html', product=product)
+    # inject for template
+    product['images']             = latest_images
+    product['image_history']      = image_history
+    product['thermal_history']    = thermal_history
+    product['status_by_timestamp']= status_by_timestamp
+
+    return render_template(
+        'product.html',
+        product=product,
+        status=current_status
+    )
+
 
 
 @app.route('/generate_reasoning/<serial_number>', methods=['POST'])
@@ -1040,145 +1042,100 @@ def train_status():
 
 @app.route('/upload_yolo_images', methods=['POST'])
 def upload_yolo_images():
-    data = request.get_json()
-    serial_number = str(data.get('serial_number'))
-    timestamp = str(data.get('timestamp'))
-    images = data.get('images', {})
-    model_name = data.get('model_name', 'unknown yet')  # Declare model_name at the top
-    if not serial_number or not images:
-        print('[UPLOAD ERROR] Missing serial_number or images in request')
-        return jsonify({'error': 'Missing serial_number or images'}), 400
+    data = request.get_json() or {}
+    serial_number = str(data.get('serial_number', '')).strip()
+    timestamp     = str(data.get('timestamp', '')).strip()
+    images        = data.get('images', {})
+    model_name    = data.get('model_name', '').strip()
 
-    # Directory for product images
-    product_dir = os.path.join('static', 'product_images', serial_number, timestamp)
-    os.makedirs(product_dir, exist_ok=True)
-    # Directory for new images
-    new_images_dir = os.path.join('static', 'new_images')
-    os.makedirs(new_images_dir, exist_ok=True)
+    if not serial_number or not timestamp or not images:
+        return jsonify({'error': 'Missing serial_number, timestamp, or images'}), 400
 
-    saved_files = []
-    received_filenames = []
-    yolo_thermal_filenames = []
+    # 1) Save incoming images
+    base_dir    = os.path.join('static', 'product_images', serial_number, timestamp)
+    labels_dir  = os.path.join(base_dir, 'labels')
+    thermal_dir = os.path.join(base_dir, 'thermal')
+    os.makedirs(base_dir, exist_ok=True)
+    os.makedirs(labels_dir, exist_ok=True)
+    os.makedirs(thermal_dir, exist_ok=True)
 
-    for key, img_info in images.items():
-        filename = img_info['filename']
-        img_b64 = img_info['data']
-        if not filename or not img_b64:
+    saved = []
+    for key, info in images.items():
+        fn = info.get('filename')
+        b64 = info.get('data')
+        if not fn or not b64:
             continue
-        img_bytes = base64.b64decode(img_b64)
+        raw = base64.b64decode(b64)
 
-        if key == "yolo":
-            product_path = os.path.join(product_dir, filename)
-            if os.path.exists(product_path):
-                print(f"[SKIPPED] Image already exists: {filename}")
-            else:
-                with open(product_path, 'wb') as f:
-                    f.write(img_bytes)
-            saved_files.append(product_path)
-            received_filenames.append(filename)
-            yolo_thermal_filenames.append(filename)
-
-        elif key == "thermal":
-            thermal_dir = os.path.join(product_dir, "thermal")
-            os.makedirs(thermal_dir, exist_ok=True)
-
-            thermal_path = os.path.join(thermal_dir, filename)
-            with open(thermal_path, "wb") as f:
-                f.write(base64.b64decode(img_b64))
-
-            # save the raw grid right beside the image  ▼▼
-            grid = img_info.get("raw_grid")
+        if key == 'thermal':
+            path = os.path.join(thermal_dir, fn)
+            # also write raw_grid JSON
+            grid = info.get('raw_grid')
             if grid:
-                loc_num   = os.path.splitext(filename)[0].split("_")[2]
-                json_name = f"area{loc_num}.json"
-                json_path = os.path.join(thermal_dir, json_name)
-                with open(json_path, "w") as jf:
-                    json.dump(
-                        {
-                            "serial_number": serial_number,
-                            "timestamp": timestamp,
-                            "raw_grid": grid,
-                        },
-                        jf,
-                        indent=2,
-                    )
-
-
-            thermal_path = os.path.join(thermal_dir, filename)
-            if os.path.exists(thermal_path):
-                print(f"[SKIPPED] Image already exists: {filename}")
-            else:
-                with open(thermal_path, 'wb') as f:
-                    f.write(img_bytes)
-            saved_files.append(thermal_path)
-            received_filenames.append(filename)
-
-        elif key in ["light", "no_light"]:
-            new_image_path = os.path.join(new_images_dir, filename)
-            if os.path.exists(new_image_path):
-                print(f"[SKIPPED] Image already exists: {filename}")
-            else:
-                with open(new_image_path, 'wb') as f:
-                    f.write(img_bytes)
-            saved_files.append(new_image_path)
-            received_filenames.append(filename)
-
+                loc = fn.split('_')[2]
+                with open(os.path.join(thermal_dir, f"area{loc}.json"), 'w') as jf:
+                    json.dump({
+                        'serial_number': serial_number,
+                        'timestamp': timestamp,
+                        'raw_grid': grid
+                    }, jf, indent=2)
+        elif key in ('light','no_light'):
+            new_dir = os.path.join('static','new_images')
+            os.makedirs(new_dir, exist_ok=True)
+            path = os.path.join(new_dir, fn)
         else:
-            product_path = os.path.join(product_dir, filename)
-            if os.path.exists(product_path):
-                print(f"[SKIPPED] Image already exists: {filename}")
-            else:
-                with open(product_path, 'wb') as f:
-                    f.write(img_bytes)
-            saved_files.append(product_path)
-            received_filenames.append(filename)
+            # covers 'yolo' and any others
+            path = os.path.join(base_dir, fn)
 
-    print(f"[UPLOAD RECEIVED] Serial: {serial_number} | Timestamp: {timestamp} | Files: {received_filenames}")
+        if not os.path.exists(path):
+            with open(path, 'wb') as f:
+                f.write(raw)
+        saved.append(path)
 
-    # === Update products.json ===
-    try:
-        products = load_products()
-    except Exception:
-        products = []
+    # 2) Determine new status (crack > scratch > normal)
+    new_status = update_status_json(serial_number, timestamp)
 
-    product = next((p for p in products if p.get("serial_number") == serial_number), None)
-    image_path = f"product_images/{serial_number}/{timestamp}/{yolo_thermal_filenames[0]}" if yolo_thermal_filenames else ""
-
-    if product:
-        # update model_name if caller supplied one
-        if model_name and product.get("model_name") != model_name:
-            product["model_name"] = model_name
+    # 3) Sync into products.json
+    products = load_products()
+    prod = next((p for p in products if p.get('serial_number')==serial_number), None)
+    if not prod:
+        prod = {
+            'serial_number': serial_number,
+            'model_name': model_name or 'unknown yet',
+            'status': new_status,
+            'status_by_timestamp': {}
+        }
+        products.append(prod)
     else:
-        products.append({
-            "serial_number": serial_number,
-            "model_name": model_name
-        })
+        # only overwrite model_name if provided
+        if model_name:
+            prod['model_name'] = model_name
+        prod['status'] = new_status
+
+    # record per‑timestamp status
+    sbt = prod.setdefault('status_by_timestamp', {})
+    sbt[timestamp] = new_status
 
     save_products(products)
 
-    # === Ensure labels directory exists ===
-    labels_dir = get_labels_directory(serial_number, timestamp)
-    os.makedirs(labels_dir, exist_ok=True)
-
-    # === YOLO inference for yolo_*.jpg only if labels don't exist ===
-    for filename in os.listdir(product_dir):
-        if filename.startswith("yolo_") and filename.endswith(".jpg"):
-            product_path = os.path.join(product_dir, filename)
-            label_path = os.path.join(labels_dir, os.path.splitext(filename)[0] + '_labels.json')
-
+    # 4) Run YOLO on any “yolo_*.jpg” with no existing labels
+    for fn in os.listdir(base_dir):
+        if fn.startswith('yolo_') and fn.lower().endswith('.jpg'):
+            img_path   = os.path.join(base_dir, fn)
+            label_path = os.path.join(labels_dir, fn.replace('.jpg','_labels.json'))
             if not os.path.exists(label_path):
                 try:
-                    results = model.predict(source=product_path, conf=0.5, verbose=False)
-                    save_yolo_labels(serial_number, timestamp, filename, results)
-                    print(f"[YOLO LABELS] Saved for {filename}")
+                    results = model.predict(source=img_path, conf=0.5, verbose=False)
+                    save_yolo_labels(serial_number, timestamp, fn, results)
                 except Exception as e:
-                    print(f"[YOLO ERROR] Could not process {filename}: {e}")
-            else:
-                print(f"[SKIPPED] Label already exists for {filename}")
+                    print(f"[YOLO ERROR] {fn}: {e}")
 
-    return jsonify({'success': True, 'saved': saved_files})
+    return jsonify({
+        'success': True,
+        'saved_images': saved,
+        'status': new_status
+    })
 
-from flask import render_template  # you already have this imported
 
 @app.route('/cracked_board_rate')
 def cracked_board_rate():
@@ -1435,5 +1392,5 @@ if __name__ == "__main__":
     host_ip = socket.gethostbyname(socket.gethostname())
     port = 5000
     print(f"\n============================================\nServer running at: http://{host_ip}:{port}\n============================================\n")
-    app.run(host="0.0.0.0", port=port, debug=True) 
+    app.run(host="0.0.0.0", port=port, debug=False) 
 

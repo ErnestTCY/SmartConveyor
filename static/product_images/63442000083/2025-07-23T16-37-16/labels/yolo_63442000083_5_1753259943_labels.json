@@ -1,0 +1,43 @@
+{
+  "image_filename": "yolo_63442000083_5_1753259943.jpg",
+  "timestamp": "2025-07-23T16:39:07.986008",
+  "detections": [
+    {
+      "class": "solarboard",
+      "confidence": 0.95,
+      "position": {
+        "x": 347,
+        "y": 0
+      },
+      "size": {
+        "width": 251,
+        "height": 474
+      },
+      "bbox": [
+        347.61224365234375,
+        0.0,
+        599.4262084960938,
+        474.5343017578125
+      ]
+    },
+    {
+      "class": "solarboard",
+      "confidence": 0.78,
+      "position": {
+        "x": 7,
+        "y": 206
+      },
+      "size": {
+        "width": 321,
+        "height": 271
+      },
+      "bbox": [
+        7.102264404296875,
+        206.78140258789062,
+        328.2198181152344,
+        477.9173889160156
+      ]
+    }
+  ],
+  "total_detections": 2
+}
