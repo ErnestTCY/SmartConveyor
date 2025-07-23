@@ -1,0 +1,149 @@
+{% extends 'base.html' %}
+{% block title %}Thermal Trends | T4G Dashboard{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <h2 class="text-center mb-4">
+    <i class="bi bi-thermometer-half"></i> Thermal Trends
+  </h2>
+
+  <!-- Period selector -->
+  <div class="input-group mb-2 w-50 mx-auto">
+    <label class="input-group-text" for="periodSelect">Period</label>
+    <select class="form-select" id="periodSelect">
+      <option value="1">Day</option>
+      <option value="7">Week</option>
+      <option value="30">Month</option>
+      <option value="0" selected>All Time</option>
+    </select>
+  </div>
+
+  <!-- Human‑readable date range -->
+  <div id="timeRangeDisplay" class="text-center mb-4 fst-italic text-secondary"></div>
+
+  <!-- 1) Avg Temp by Area -->
+  <div class="row mb-4">
+    <div class="col-md-8 offset-md-2">
+      <canvas id="thermalAvgChart"></canvas>
+    </div>
+  </div>
+
+  <!-- 2) Temp Distribution Histogram -->
+  <div class="row mb-5">
+    <div class="col-md-8 offset-md-2">
+      <canvas id="thermalHistChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Back button -->
+  <div class="text-center">
+    <a href="{{ url_for('analytics') }}" class="btn btn-outline-secondary">
+      ← Back to Dashboard
+    </a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const periodSelect   = document.getElementById('periodSelect');
+  const rangeDisplay   = document.getElementById('timeRangeDisplay');
+  const avgCtx         = document.getElementById('thermalAvgChart').getContext('2d');
+  const histCtx        = document.getElementById('thermalHistChart').getContext('2d');
+  let   avgChart       = null;
+  let   histChart      = null;
+
+  // Show “Last X” human‑readable label
+  function updateRange(days) {
+    if (+days === 0) {
+      rangeDisplay.textContent = 'Showing data: All Time';
+      return;
+    }
+    const now  = new Date();
+    const past = new Date(now - days*24*60*60*1000);
+    const label = days == 1 ? 'Last Day'
+                : days == 7 ? 'Last Week'
+                : days == 30 ? 'Last Month'
+                : `Last ${days} Days`;
+    rangeDisplay.textContent = `${label} — since ${past.toLocaleString()}`;
+  }
+
+  function fetchThermal(days) {
+    updateRange(days);
+    fetch(`/api/thermal_trends_data?days=${days}`)
+      .then(r => r.json())
+      .then(data => {
+        const areaAvg = data.area_avg || {};
+        const dist   = data.distribution || {below:0, normal:0, above:0};
+
+        // 1) Line chart: Avg Temp by Area
+        const areas    = Object.keys(areaAvg).sort();
+        const avgTemps = areas.map(a => +areaAvg[a].toFixed(2));
+        if (avgChart) avgChart.destroy();
+        avgChart = new Chart(avgCtx, {
+          type: 'line',
+          data: {
+            labels: areas,
+            datasets: [{
+              label: 'Avg Temp (°C)',
+              data: avgTemps,
+              fill: false,
+              tension: 0.3
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              title: {
+                display: true,
+                text: 'Average Temperature by Area'
+              }
+            },
+            scales: {
+              y: { title: { display: true, text: 'Temperature (°C)' } },
+              x: { title: { display: true, text: 'Area' } }
+            }
+          }
+        });
+
+        // 2) Bar chart: Distribution
+        if (histChart) histChart.destroy();
+        histChart = new Chart(histCtx, {
+          type: 'bar',
+          data: {
+            labels: ['Below 25 °C','25–38 °C','Above 38 °C'],
+            datasets: [{
+              label: 'Count',
+              data: [dist.below, dist.normal, dist.above]
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              title: {
+                display: true,
+                text: 'Temperature Distribution'
+              }
+            },
+            scales: {
+              y: { title: { display: true, text: 'Readings Count' } },
+              x: { title: { display: true, text: '' } }
+            }
+          }
+        });
+      })
+      .catch(err => console.error('Thermal data load failed', err));
+  }
+
+  // Wire up selector
+  periodSelect.addEventListener('change', () => {
+    fetchThermal(periodSelect.value);
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    fetchThermal(periodSelect.value);
+  });
+</script>
+{% endblock %}

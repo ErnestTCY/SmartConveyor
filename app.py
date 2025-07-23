@@ -21,7 +21,7 @@ import time
 import socket
 from collections import Counter
 from pathlib import Path  
-
+from collections import defaultdict
 
 # === App Setup ===
 app = Flask(__name__, template_folder='templates/htmls', static_folder='static')
@@ -1193,13 +1193,12 @@ def cracked_board_rate_data():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-# 1️⃣ Page Route
+
 @app.route('/inspection_accuracy')
 def inspection_accuracy():
     return render_template('inspection_accuracy.html')
 
 
-# 2️⃣ List all trained timestamps
 @app.route('/api/inspection_timestamps')
 def inspection_timestamps():
     base = 'trained_models'
@@ -1214,7 +1213,55 @@ def inspection_timestamps():
     return jsonify(runs)
 
 
-# 3️⃣ Return best_metrics for one timestamp
+@app.route('/thermal_trends')
+def thermal_trends():
+    return render_template('thermal_trends.html')
+
+
+@app.route('/api/thermal_trends_data')
+def thermal_trends_data():
+    # parse days= query (0 = all time)
+    days = request.args.get('days', default=0, type=int)
+    products = load_products()   # :contentReference[oaicite:0]{index=0}
+
+    now    = datetime.now()
+    cutoff = now - timedelta(days=days) if days > 0 else None
+
+    # collect all readings by area
+    area_readings = defaultdict(list)
+    for p in products:
+        for ts, area_map in p.get('thermal_by_timestamp', {}).items():
+            # parse timestamp
+            try:
+                dt = datetime.fromisoformat(ts)
+            except ValueError:
+                dt = datetime.strptime(ts, '%Y-%m-%dT%H-%M-%S')
+            if cutoff is None or dt >= cutoff:
+                for area, grid in area_map.items():
+                    # flatten the grid and extend
+                    flat = [v for row in grid for v in row]
+                    area_readings[area].extend(flat)
+
+    # compute average temperature per area
+    area_avg = {
+        area: (sum(vals)/len(vals)) if vals else None
+        for area, vals in area_readings.items()
+    }
+
+    # compute distribution counts
+    below = normal = above = 0
+    for vals in area_readings.values():
+        for v in vals:
+            if v < 25:      below  += 1
+            elif v > 38:    above  += 1
+            else:           normal += 1
+
+    return jsonify({
+        'area_avg':     area_avg,
+        'distribution': {'below': below, 'normal': normal, 'above': above}
+    })
+
+
 @app.route('/api/inspection_accuracy_data')
 def inspection_accuracy_data():
     ts = request.args.get('timestamp')
@@ -1225,7 +1272,7 @@ def inspection_accuracy_data():
     with open(path) as f:
         data = json.load(f)
     return jsonify(data)
-    
+
 @app.route('/api/best_metrics')
 def best_metrics_api():
     import os, json
@@ -1250,6 +1297,15 @@ def best_metrics_api():
     with open(path) as f:
         data = json.load(f)
     return jsonify(data)
+
+@app.route('/api/products_data')
+def products_data():
+    # returns the full products.json array
+    try:
+        products = load_products()
+    except FileNotFoundError:
+        products = []
+    return jsonify(products)
 
 
 @app.route('/api/analytics_data')

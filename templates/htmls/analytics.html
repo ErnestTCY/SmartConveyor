@@ -76,17 +76,23 @@
     </a>
   </div>
 
-  <!-- Temperature Trends -->
-  <div class="col-md-4 mb-4">
-    <div class="card h-100 shadow border-0">
-      <div class="card-body">
-        <h5 class="card-title">
-          <i class="bi bi-thermometer-half"></i> Temperature Trends
-        </h5>
-        <canvas id="tempChart"></canvas>
-      </div>
-    </div>
-  </div>
+  <!-- Thermal Trends -->
+ <div class="col-md-4 mb-4">
+  <a href="{{ url_for('thermal_trends') }}" class="text-decoration-none text-dark">
+     <div class="card-body">
+       <h5 class="card-title">
+         <i class="bi bi-thermometer-half"></i> Thermal Trends
+       </h5>
+
+       <!-- Average Temperature by Area -->
+       <canvas id="thermalAvgChart" class="mb-4"></canvas>
+
+       <!-- Temperature Distribution Histogram -->
+       <canvas id="thermalHistChart"></canvas>
+     </div>
+   </div>
+  </a>
+ </div>
 </div>
 {% endblock %}
 
@@ -242,18 +248,97 @@ fetch('/api/best_metrics')
 
 
 
-  // 5) Draw the Temperature Trends line chart (unchanged)
-  new Chart(document.getElementById('tempChart'), {
-    type: 'line',
+  // 5) Draw Thermal Trends charts
+fetch('/api/products_data')
+  .then(r => r.json())
+  .then(products => {
+    // aggregate all thermal readings by area
+    const areaTemps = {};
+    products.forEach(p => {
+      const tb = p.thermal_by_timestamp || {};
+      Object.values(tb).forEach(areaObj => {
+        Object.entries(areaObj).forEach(([area, grid]) => {
+          const flat = grid.flat();
+          areaTemps[area] = (areaTemps[area]||[]).concat(flat);
+        });
+      });
+    });
+
+    // ——— 1) Average temp per area ———
+    const areas    = Object.keys(areaTemps).sort();
+    const avgTemps = areas.map(a => {
+      const arr = areaTemps[a];
+      return arr.reduce((s,v)=>s+v,0)/arr.length;
+    });
+
+    new Chart(
+  document.getElementById('thermalAvgChart').getContext('2d'),
+  {
+    type: 'line',                   // ← line instead of bar
     data: {
-      labels: ['10:00', '10:05', '10:10', '10:15'],
+      labels: areas,
       datasets: [{
-        label: 'Avg Temperature (°C)',
-        data: [35, 36, 34, 37],
+        label: 'Avg Temp (°C)',
+        data: avgTemps,
         fill: false,
-        borderColor: 'blue'
+        tension: 0.3                  // smooth curve (optional)
       }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        title: {
+          display: true,
+          text: 'Average Temperature by Area'
+        }
+      },
+      scales: {
+        y: {
+          title: { display: true, text: 'Temperature (°C)' }
+        },
+        x: {
+          title: { display: true, text: 'Area' }
+        }
+      }
     }
-  });
+  }
+);
+
+
+    // ——— 2) Temperature distribution histogram ———
+    let below=0, normal=0, above=0;
+    Object.values(areaTemps).flat().forEach(v => {
+      if (v < 25)      below++;
+      else if (v > 38) above++;
+      else             normal++;
+    });
+
+    new Chart(
+      document.getElementById('thermalHistChart').getContext('2d'),
+      {
+        type: 'bar',
+        data: {
+          labels: ['Below 25°C','25–38°C','Above 38°C'],
+          datasets: [{
+            label: 'Count',
+            data: [below, normal, above]
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            title: {
+              display: true,
+              text: 'Temperature Distribution'
+            }
+          }
+        }
+      }
+    );
+  })
+  .catch(err => console.error('Thermal data load failed', err));
+
 </script>
 {% endblock %}
