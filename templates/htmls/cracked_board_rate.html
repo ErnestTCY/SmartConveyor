@@ -110,7 +110,9 @@
             }
           }
         });
-      })
+        statusChart.data.datasets[0].backgroundColor.reverse();
+        statusChart.update();
+              })
       .catch(err => console.error('❌ History load failed', err));
   }
 

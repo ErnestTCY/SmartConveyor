@@ -6,7 +6,7 @@ import json
 
 def train():
     # Set up paths
-    data_yaml = "C:/Users/User/Desktop/hanging/Competition/T4G 022025/Dep3/data.yaml"
+    data_yaml = "C:/Users/User/Desktop/hanging/Competition/T4G 022025/dep4/data.yaml"
     model_name = "yolov8n-seg.pt"
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     output_model_name = f"{timestamp}.pt"
@@ -24,7 +24,7 @@ def train():
     model.train(
         data=data_yaml,
         epochs=50,
-        imgsz=320,
+        imgsz=640,
         batch=4,
         device='cuda',
         workers=0,

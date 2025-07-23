@@ -178,7 +178,7 @@
 
       // 3) Draw the history pie chart
       const hc = data.history_counts || {};
-      new Chart(
+      const historyChart = new Chart(
         document.getElementById('statusChart').getContext('2d'),
         {
           type: 'pie',
@@ -200,6 +200,8 @@
           }
         }
       );
+      historyChart.data.datasets[0].backgroundColor.reverse();
+      historyChart.update();
     })
     .catch(err => {
       document.getElementById('analyticsSummary').innerHTML =

@@ -97,6 +97,31 @@ def mqtt_heartbeat():
         time.sleep(15)
 threading.Thread(target=mqtt_heartbeat, daemon=True).start()
 
+def determine_status_from_labels(serial_number: str, timestamp: str) -> list[str]:
+    """
+    Reads all *_labels.json under:
+        static/product_images/<serial_number>/<timestamp>/labels/
+    Returns a list of statuses in priority order: crack > scratch > normal.
+    """
+    labels_dir = os.path.join('static', 'product_images', serial_number, timestamp, 'labels')
+    if not os.path.isdir(labels_dir):
+        return ['normal']
+
+    saw_crack = False
+
+    for lf in glob.glob(os.path.join(labels_dir, '*_labels.json')):
+        try:
+            data = json.load(open(lf, 'r', encoding='utf-8'))
+        except Exception:
+            continue
+        for det in data.get('detections', []):
+            cls = det.get('class', '').lower()
+            if 'crack' in cls:
+                saw_crack = True
+    if saw_crack:
+        return ['crack']
+    return ['normal']
+
 # === Gemini API Setup ===
 genai.configure(api_key=os.getenv('GEMINI_API_KEY', ''))
 
@@ -505,17 +530,15 @@ threading.Thread(target=start_camera_loop, daemon=True).start()
 
 # === YOLO Model Loading ===
 def load_latest_model():
-    model_dir = "trained_models"
-    # Ensure the directory exists
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir, exist_ok=True)
-    pt_files = [f for f in os.listdir(model_dir) if f.endswith('.pt')]
-    if not pt_files:
-        print("⚠ No .pt model found in trained_models/. Using fallback.")
-        return YOLO("yolov8n-seg.pt")  # fallback
-    latest = max(pt_files, key=lambda f: os.path.getmtime(os.path.join(model_dir, f)))
+    MODEL_DIR = os.path.join(os.getcwd(), "trained_models")
+    pt_files = [f for f in os.listdir(MODEL_DIR) if f.endswith('.pt')]
+    # parse YYYYmmdd_HHMMSS from the filename
+    latest = max(
+        pt_files,
+        key=lambda f: datetime.strptime(f[:-3], '%Y%m%d_%H%M%S')
+    )
     print(f"✅ Loaded latest model: {latest}")
-    return YOLO(os.path.join(model_dir, latest))
+    return YOLO(os.path.join(MODEL_DIR, latest))
 model = load_latest_model()
 
 # === Self-Learn/Training Paths ===
@@ -1136,6 +1159,55 @@ def upload_yolo_images():
         'status': new_status
     })
 
+@app.route('/product/<serial_number>/refresh_status/<timestamp>', methods=['POST'])
+def refresh_status(serial_number, timestamp):
+    """
+    1) Rerun YOLO on every yolo_*.jpg under
+       static/product_images/<serial_number>/<timestamp>/labels/,
+       overwriting *_labels.json.
+    2) Recompute status.json.
+    3) Update products.json, storing a plain string per timestamp.
+    """
+    base_dir   = os.path.join('static', 'product_images', serial_number, timestamp)
+    labels_dir = os.path.join(base_dir, 'labels')
+
+    # 1) Rerun YOLO on each new image, overwrite labels
+    for fn in os.listdir(base_dir):
+        if fn.startswith('yolo_') and fn.lower().endswith('.jpg'):
+            img_path   = os.path.join(base_dir, fn)
+            label_path = os.path.join(labels_dir, fn.replace('.jpg', '_labels.json'))
+
+            if os.path.exists(label_path):
+                os.remove(label_path)
+            try:
+                results = model.predict(source=img_path, conf=0.5, verbose=False)
+                save_yolo_labels(serial_number, timestamp, fn, results)
+            except Exception as e:
+                print(f"[REFRESH YOLO ERROR] {fn}: {e}")
+
+    # 2) Recompute the status list
+    status_list = determine_status_from_labels(serial_number, timestamp)
+    # Turn it into a single string (e.g. "crack" or "normal" or "crack & scratch")
+    status_str = ' & '.join(status_list)
+
+    # Write out status.json for this timestamp
+    status_path = os.path.join(base_dir, 'status.json')
+    with open(status_path, 'w', encoding='utf-8') as sf:
+        json.dump({'status': status_list}, sf, indent=2)
+
+    # 3) Sync into products.json
+    products = load_products()
+    prod = next((p for p in products if p.get('serial_number') == serial_number), None)
+    if prod:
+        # Store the plain string here instead of a list
+        prod.setdefault('status_by_timestamp', {})[timestamp] = status_str
+        # Also update the product’s overall status display
+        prod['status'] = status_str
+        save_products(products)
+
+    # Redirect back so the UI will fetch the new labels and status
+    return redirect(url_for('product_detail', serial_number=serial_number))
+
 
 @app.route('/cracked_board_rate')
 def cracked_board_rate():
@@ -1149,13 +1221,13 @@ def cracked_board_rate_data():
         days = request.args.get('days', default=0, type=int)
 
         # 2) load your product list
-        products = load_products()
+        products     = load_products()
         total_boards = len(products)
 
         # 3) prepare counters
         status_counts  = Counter()
         history_counts = Counter()
-        history_raw    = {}       # collect timestamp → status
+        history_raw    = {}       # timestamp → joined status string
 
         # 4) compute cutoff
         now    = datetime.now()
@@ -1175,9 +1247,20 @@ def cracked_board_rate_data():
 
                 # only keep if inside the window
                 if cutoff is None or dt >= cutoff:
-                    status_lower = st.lower()
-                    filtered_statuses.append(status_lower)
-                    history_raw[ts] = status_lower
+                    # --- flatten & lowercase ---
+                    if isinstance(st, list):
+                        # e.g. ['crack', 'scratch']
+                        status_list = [str(item).lower() for item in st]
+                        joined      = ' & '.join(status_list)
+                    else:
+                        joined      = str(st).lower()
+                        status_list = [joined]
+
+                    # accumulate for history_counts
+                    for s in status_list:
+                        filtered_statuses.append(s)
+                    # record a single string per timestamp
+                    history_raw[ts] = joined
 
             # update aggregate counts
             history_counts.update(filtered_statuses)
@@ -1340,16 +1423,29 @@ def products_data():
 @app.route('/api/analytics_data')
 def analytics_data():
     try:
-        with open(DATA_FILE) as f:
+        # 1) Load products
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
             products = json.load(f)
         total_boards = len(products)
 
-        status_counts = {}
+        # 2) Prepare counters
+        status_counts  = {'cracked': 0, 'scratch': 0, 'healthy': 0, 'unknown': 0}
         history_counts = Counter()
 
+        # 3) Iterate products and safely flatten statuses
         for p in products:
-            # classification by ever‑seen status
-            sts = [s.lower() for s in p.get('status_by_timestamp', {}).values()]
+            raw_values = p.get('status_by_timestamp', {}).values()
+
+            # Build a flat list of lowercase statuses
+            sts = []
+            for entry in raw_values:
+                if isinstance(entry, list):
+                    # e.g. ['crack','scratch']
+                    sts.extend(str(item).lower() for item in entry)
+                else:
+                    sts.append(str(entry).lower())
+
+            # 4) Classify each board by its worst‑seen status
             if 'cracked' in sts:
                 cls = 'cracked'
             elif 'scratch' in sts:
@@ -1358,31 +1454,35 @@ def analytics_data():
                 cls = 'healthy'
             else:
                 cls = 'unknown'
-            status_counts[cls] = status_counts.get(cls, 0) + 1
+            status_counts[cls] += 1
+
+            # 5) Accumulate overall history
             history_counts.update(sts)
 
-        c = status_counts.get
-        cracked  = c('cracked',  0)
-        scratch  = c('scratch',  0)
-        healthy  = c('healthy',  0)
-        unknown  = c('unknown',  0)
+        # 6) Helper for percentage
+        def pct(n):
+            return round(n/total_boards*100, 2) if total_boards else 0
 
-        def pct(x): return round(x/total_boards*100,2) if total_boards else 0
+        # 7) Build and return payload
+        cracked = status_counts['cracked']
+        scratch = status_counts['scratch']
+        healthy = status_counts['healthy']
+        unknown = status_counts['unknown']
+
         return jsonify({
             'total_boards':    total_boards,
             'cracked_boards':  cracked,
-            'scratch_boards':  scratch,
             'healthy_boards':  healthy,
             'unknown_boards':  unknown,
             'cracked_percent': pct(cracked),
-            'scratch_percent': pct(scratch),
             'healthy_percent': pct(healthy),
             'status_counts':   status_counts,
             'history_counts':  dict(history_counts),
             'defect_rate':     pct(cracked + scratch)
         })
     except Exception as e:
-        print("read error")
+        # Mirror your previous error handling
+        print("read error:", e)
         return jsonify({'error': str(e)}), 500
 
 

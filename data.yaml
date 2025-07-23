@@ -1,8 +1,8 @@
-train: C:/Users/User/Desktop/hanging/Competition/T4G 022025/Dep3/train/images
-val: C:/Users/User/Desktop/hanging/Competition/T4G 022025/Dep3/val/images
+train: C:/Users/User/Desktop/hanging/Competition/T4G 022025/Dep4/train/images
+val: C:/Users/User/Desktop/hanging/Competition/T4G 022025/Dep4/val/images
 
-nc: 3
-names: ['crack', 'scratch', 'solarboard']
+nc: 2
+names: ['crack', 'solarboard']
 
 roboflow:
   workspace: objdetections
