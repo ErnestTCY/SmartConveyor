@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+{% block title %}Inspection Accuracy | T4G Dashboard{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <h2 class="text-center mb-4">🎯 Inspection Accuracy</h2>
+
+  <!-- Timestamp selector -->
+  <div class="input-group mb-1 w-50 mx-auto">
+    <label class="input-group-text" for="tsSelect">Date</label>
+    <select class="form-select" id="tsSelect">
+      <!-- Options injected by JS -->
+    </select>
+  </div>
+
+  <!-- ◀ NEW: Human‑readable timestamp -->
+  <div id="tsDisplay" class="text-center mb-3 fst-italic text-secondary">
+    <!-- e.g. “2025/07/22 15:26:39” -->
+  </div>
+
+  <!-- Numeric display -->
+  <div class="text-center mb-3">
+    <h3 id="accuracyValue" class="fw-bold">--%</h3>
+  </div>
+
+  <!-- Gauge chart -->
+  <div class="row mb-5">
+    <div class="col-md-6 offset-md-3">
+      <canvas id="accuracyGauge"></canvas>
+    </div>
+  </div>
+
+  <div class="text-center">
+    <a href="{{ url_for('analytics') }}" class="btn btn-outline-secondary">
+      ← Back to Dashboard
+    </a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const tsSelect      = document.getElementById('tsSelect');
+  const tsDisplay     = document.getElementById('tsDisplay');      // ◀ NEW
+  const accuracyValue = document.getElementById('accuracyValue');
+  const gaugeCtx      = document.getElementById('accuracyGauge').getContext('2d');
+  let   gaugeChart    = null;
+
+  // Turn "YYYYmmdd_HHMMSS" → "YYYY/MM/DD HH:MM:SS"
+  function formatTimestamp(ts) {
+    const [ymd, hms] = ts.split('_');
+    const year  = ymd.slice(0,4),
+          month = ymd.slice(4,6),
+          day   = ymd.slice(6,8);
+    const hour  = hms.slice(0,2),
+          min   = hms.slice(2,4),
+          sec   = hms.slice(4,6);
+    return `${year}/${month}/${day} ${hour}:${min}:${sec}`;
+  }
+
+  // Populate dropdown with all timestamps
+  fetch('/api/inspection_timestamps')
+    .then(r => r.json())
+    .then(runs => {
+      runs.forEach(ts => {
+        const opt = document.createElement('option');
+        opt.value = ts;
+        opt.text  = ts;
+        tsSelect.add(opt);
+      });
+      if (runs.length) {
+        const latest = runs[runs.length - 1];
+        tsSelect.value = latest;
+        onTimestampChange(latest);
+      }
+    });
+
+  // Handle user selection
+  tsSelect.addEventListener('change', () => {
+    onTimestampChange(tsSelect.value);
+  });
+
+  function onTimestampChange(ts) {
+    // ◀ NEW: show human‑readable timestamp
+    tsDisplay.textContent = formatTimestamp(ts);
+
+    // then load accuracy
+    fetch(`/api/inspection_accuracy_data?timestamp=${ts}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) {
+          console.error(data.error);
+          return;
+        }
+        const pct = Math.round((data.accuracy || 0) * 100);
+        accuracyValue.textContent = pct + '%';
+
+        const rem   = 100 - pct;
+        let   color;
+        if      (pct >  90) color = 'blue';
+        else if (pct >= 80) color = 'green';
+        else if (pct >= 50) color = 'yellow';
+        else                color = 'red';
+
+        if (gaugeChart) gaugeChart.destroy();
+        gaugeChart = new Chart(gaugeCtx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Accuracy','Remaining'],
+            datasets: [{
+              data: [pct, rem],
+              backgroundColor: [color, '#dee2e6']
+            }]
+          },
+          options: {
+            cutout: '80%',
+            plugins: {
+              tooltip: {
+                callbacks: {
+                  label: ctx => `${ctx.label}: ${ctx.parsed}%`
+                }
+              }
+            }
+          }
+        });
+      })
+      .catch(err => console.error('Failed to load accuracy', err));
+  }
+</script>
+{% endblock %}

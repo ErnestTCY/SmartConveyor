@@ -24,20 +24,29 @@
 </div>
 
 <div class="row my-4">
-  <!-- Inspection Accuracy -->
-  <div class="col-md-4 mb-4">
-    <div class="card h-100 shadow border-0">
+   <!-- Inspection Accuracy -->
+   <div class="col-md-4 mb-4">
+    <a href="{{ url_for('inspection_accuracy') }}" class="text-decoration-none text-dark">
+      <div class="card h-100 shadow border-0">
       <div class="card-body">
         <h5 class="card-title">
           <i class="bi bi-bullseye"></i> Inspection Accuracy
         </h5>
+
+        <!-- ◀ NEW: Numeric accuracy display -->
+        <div class="text-center mb-3">
+          <h3 id="accuracyValue" class="fw-bold">--%</h3>
+        </div>
+
         <canvas id="accuracyGauge"></canvas>
       </div>
     </div>
+  </a> 
   </div>
 
-   <!-- Cracked Boards Rate (clickable) -->
-   <div class="col-md-4 mb-4">
+
+  <!-- Cracked Boards Rate (clickable) -->
+  <div class="col-md-4 mb-4">
     <a href="{{ url_for('cracked_board_rate') }}" class="text-decoration-none text-dark">
       <div class="card h-100 shadow border-0">
         <div class="card-body">
@@ -84,24 +93,24 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-// 1) Fetch and render the top Business Analytics Summary
-fetch('/api/analytics_data')
-  .then(r => r.json())
-  .then(data => {
-    // handle errors / no data
-    if (data.error) {
-      document.getElementById('analyticsSummary').innerHTML =
-        `<div class="text-danger">Error loading analytics: ${data.error}</div>`;
-      return;
-    }
-    if (!data.total_boards) {
-      document.getElementById('analyticsSummary').innerHTML =
-        `<div class="text-warning">No analytics data available.</div>`;
-      return;
-    }
+  // 1) Fetch and render the top Business Analytics Summary
+  fetch('/api/analytics_data')
+    .then(r => r.json())
+    .then(data => {
+      // handle errors / no data
+      if (data.error) {
+        document.getElementById('analyticsSummary').innerHTML =
+          `<div class="text-danger">Error loading analytics: ${data.error}</div>`;
+        return;
+      }
+      if (!data.total_boards) {
+        document.getElementById('analyticsSummary').innerHTML =
+          `<div class="text-warning">No analytics data available.</div>`;
+        return;
+      }
 
-    // build summary badges
-    const summaryHtml = `
+      // build summary badges
+      const summaryHtml = `
       <div class="row text-center">
         <div class="col-md-2 mb-2">
           <span class="badge bg-primary fs-5">
@@ -141,72 +150,110 @@ fetch('/api/analytics_data')
               <strong>Status Breakdown:</strong>
               <ul class="list-inline mb-0">
                 ${Object.entries(data.status_counts).map(
-                  ([s,c]) => `<li class="list-inline-item">
+        ([s, c]) => `<li class="list-inline-item">
                     <span class="badge bg-dark">${s}: ${c}</span>
                   </li>`
-                ).join('')}
+      ).join('')}
               </ul>
             </div>
           </div>
         </div>
       </div>`;
-    document.getElementById('analyticsSummary').innerHTML = summaryHtml;
+      document.getElementById('analyticsSummary').innerHTML = summaryHtml;
 
-    // 2) Populate only the Total Boards card in Cracked Boards Rate
-    document.getElementById('totalBoards').textContent = data.total_boards;
+      // 2) Populate only the Total Boards card in Cracked Boards Rate
+      document.getElementById('totalBoards').textContent = data.total_boards;
 
-    // 3) Draw the history pie chart
-    const hc = data.history_counts || {};
+      // 3) Draw the history pie chart
+      const hc = data.history_counts || {};
+      new Chart(
+        document.getElementById('statusChart').getContext('2d'),
+        {
+          type: 'pie',
+          data: {
+            labels: Object.keys(hc).map(
+              s => s.charAt(0).toUpperCase() + s.slice(1)
+            ),
+            datasets: [{ data: Object.values(hc) }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { position: 'bottom' },
+              title: {
+                display: true,
+                text: 'Status History Distribution'
+              }
+            }
+          }
+        }
+      );
+    })
+    .catch(err => {
+      document.getElementById('analyticsSummary').innerHTML =
+        `<div class="text-danger">Failed to load analytics: ${err}</div>`;
+    });
+
+
+  // 4) Dynamic Inspection Accuracy gauge
+fetch('/api/best_metrics')
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      console.error(data.error);
+      return;
+    }
+    const pct = Math.round(data.accuracy * 100);
+    const remainder = 100 - pct;
+
+    // ◀ NEW: show percentage in the card
+    document.getElementById('accuracyValue').textContent = pct + '%';
+
+    let color;
+    if      (pct >  90) color = 'blue';
+    else if (pct >= 80) color = 'green';
+    else if (pct >= 50) color = 'yellow';
+    else                color = 'red';
+
     new Chart(
-      document.getElementById('statusChart').getContext('2d'),
+      document.getElementById('accuracyGauge'),
       {
-        type: 'pie',
+        type: 'doughnut',
         data: {
-          labels: Object.keys(hc).map(
-            s => s.charAt(0).toUpperCase() + s.slice(1)
-          ),
-          datasets: [{ data: Object.values(hc) }]
+          labels: ['Accuracy','Remaining'],
+          datasets: [{
+            data: [pct, remainder],
+            backgroundColor: [color, '#dee2e6']
+          }]
         },
         options: {
-          responsive: true,
+          cutout: '80%',
           plugins: {
-            legend: { position: 'bottom' },
-            title: {
-              display: true,
-              text: 'Status History Distribution'
+            tooltip: {
+              callbacks: { label: ctx => `${ctx.label}: ${ctx.parsed}%` }
             }
           }
         }
       }
     );
   })
-  .catch(err => {
-    document.getElementById('analyticsSummary').innerHTML =
-      `<div class="text-danger">Failed to load analytics: ${err}</div>`;
+  .catch(err => console.error('Failed to load best metrics', err));
+
+
+
+
+  // 5) Draw the Temperature Trends line chart (unchanged)
+  new Chart(document.getElementById('tempChart'), {
+    type: 'line',
+    data: {
+      labels: ['10:00', '10:05', '10:10', '10:15'],
+      datasets: [{
+        label: 'Avg Temperature (°C)',
+        data: [35, 36, 34, 37],
+        fill: false,
+        borderColor: 'blue'
+      }]
+    }
   });
-
-// 4) Draw the Inspection Accuracy gauge (unchanged)
-new Chart(document.getElementById('accuracyGauge'), {
-  type: 'doughnut',
-  data: {
-    labels: ['Accuracy','Remaining'],
-    datasets: [{ data: [90,10], backgroundColor:['#28a745','#dee2e6'] }]
-  },
-  options: { cutout: '80%' }
-});
-
-// 5) Draw the Temperature Trends line chart (unchanged)
-new Chart(document.getElementById('tempChart'), {
-  type: 'line',
-  data: {
-    labels: ['10:00','10:05','10:10','10:15'],
-    datasets:[{
-      label:'Avg Temperature (°C)',
-      data:[35,36,34,37],
-      fill:false,
-      borderColor:'blue'
-    }]
-  }
-});
 </script>
 {% endblock %}

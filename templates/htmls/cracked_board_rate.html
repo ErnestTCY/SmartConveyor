@@ -5,8 +5,22 @@
 <div class="container py-4">
   <h2 class="text-center mb-4">📊 Cracked Board Rate Analytics</h2>
 
+  <!-- ← NEW: Period selector -->
+  <div class="input-group mb-2 w-50 mx-auto">
+    <label class="input-group-text" for="periodSelect">Period</label>
+    <select class="form-select" id="periodSelect">
+      <option value="1">Day</option>
+      <option value="7">Week</option>
+      <option value="30">Month</option>
+      <option value="0" selected>All Time</option>
+    </select>
+  </div>
+
+  <!-- ← NEW: Display the computed date‐range -->
+  <div id="timeRangeDisplay" class="text-center mb-4 fst-italic"></div>
+
   <!-- Status History Summary -->
-  <h4 class="mt-5 text-center">Status History Summary</h4>
+  <h4 class="mt-3 text-center">Status History Summary</h4>
   <div class="row text-center mb-4" id="historySummary">
     <!-- injected by JS -->
   </div>
@@ -29,52 +43,79 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-fetch('/api/analytics_data')
-  .then(r => r.json())
-  .then(data => {
-    const hc       = data.history_counts || {};
-    const totalHist = Object.values(hc).reduce((sum, v) => sum + v, 0) || 1;
-    const row      = document.getElementById('historySummary');
-    row.innerHTML  = '';
+  const periodSelect    = document.getElementById('periodSelect');
+  const rangeDisplay    = document.getElementById('timeRangeDisplay');       // ◀ NEW
+  const row             = document.getElementById('historySummary');
+  const ctx             = document.getElementById('statusChart').getContext('2d');
+  let   statusChart     = null;
 
-    // inject per‑status summary cards
-    Object.entries(hc).forEach(([status, cnt]) => {
-      const pct = ((cnt / totalHist) * 100).toFixed(2);
-      row.insertAdjacentHTML('beforeend', `
-        <div class="col-md-3 mb-3">
-          <div class="card border-info shadow-sm">
-            <div class="card-body">
-              <h5>${status.charAt(0).toUpperCase() + status.slice(1)}</h5>
-              <h3>${cnt}</h3>
-              <small>${pct}%</small>
+  // ◀ NEW: compute & show the date‐range
+  function updateRange(days) {
+    if (+days === 0) {
+      rangeDisplay.textContent = 'Showing data for: All Time';
+      return;
+    }
+    const now  = new Date();
+    const past = new Date(now.getTime() - days * 24*60*60*1000);
+    // You can tweak toLocaleString to show only date if you like.
+    const label = days == 1 ? 'Last Day'
+                : days == 7 ? 'Last Week'
+                : days == 30 ? 'Last Month'
+                : `Last ${days} Days`;
+    rangeDisplay.textContent = `${label} — since ${past.toLocaleString()}`;
+  }
+
+  function fetchData(days) {
+    updateRange(days);   // ◀ NEW: show current range at each fetch
+
+    fetch(`/api/cracked_board_rate_data?days=${days}`)
+      .then(r => r.json())
+      .then(data => {
+        const hc        = data.history_counts || {};
+        const totalHist = Object.values(hc).reduce((sum,v) => sum + v, 0) || 1;
+
+        // 1) render summary cards
+        row.innerHTML = '';
+        Object.entries(hc).forEach(([status, cnt]) => {
+          const pct = ((cnt / totalHist) * 100).toFixed(2);
+          row.insertAdjacentHTML('beforeend', `
+            <div class="col-md-3 mb-3">
+              <div class="card border-info shadow-sm">
+                <div class="card-body">
+                  <h5>${status.charAt(0).toUpperCase()+status.slice(1)}</h5>
+                  <h3>${cnt}</h3>
+                  <small>${pct}%</small>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      `);
-    });
+          `);
+        });
 
-    // draw history pie chart
-    new Chart(
-      document.getElementById('statusChart').getContext('2d'),
-      {
-        type: 'pie',
-        data: {
-          labels: Object.keys(hc).map(s => s.charAt(0).toUpperCase() + s.slice(1)),
-          datasets: [{ data: Object.values(hc) }]
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: { position: 'bottom' },
-            title: {
-              display: true,
-              text: 'Status History Distribution'
+        // 2) redraw pie chart
+        if (statusChart) statusChart.destroy();
+        statusChart = new Chart(ctx, {
+          type: 'pie',
+          data: {
+            labels:   Object.keys(hc).map(s => s.charAt(0).toUpperCase()+s.slice(1)),
+            datasets: [{ data: Object.values(hc) }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { position: 'bottom' },
+              title: {
+                display: true,
+                text: 'Status History Distribution'
+              }
             }
           }
-        }
-      }
-    );
-  })
-  .catch(err => console.error('❌ History load failed', err));
+        });
+      })
+      .catch(err => console.error('❌ History load failed', err));
+  }
+
+  // wire it up
+  periodSelect.addEventListener('change', () => fetchData(periodSelect.value));
+  document.addEventListener('DOMContentLoaded', () => fetchData(periodSelect.value));
 </script>
 {% endblock %}

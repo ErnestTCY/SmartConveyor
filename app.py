@@ -1130,36 +1130,127 @@ def upload_yolo_images():
 
     return jsonify({'success': True, 'saved': saved_files})
 
+from flask import render_template  # you already have this imported
+
 @app.route('/cracked_board_rate')
 def cracked_board_rate():
+    return render_template('cracked_board_rate.html')
+
+
+@app.route('/api/cracked_board_rate_data')
+def cracked_board_rate_data():
     try:
-        with open(DATA_FILE) as f:
-            data = json.load(f)
+        # 1) get “days” from query (0 = all‑time)
+        days = request.args.get('days', default=0, type=int)
 
-        cracked_boards = 0
-        tot_boards = len(data)
-        for board in data:
-            # any thermal cell ≥30°C → cracked
-            if any(
-                temp >= 30.0
-                for areas in board.get("thermal_by_timestamp", {}).values()
-                for rows in areas.values()
-                for row in rows
-                for temp in row
-            ):
-                cracked_boards += 1
+        # 2) load your product list
+        products = load_products()
+        total_boards = len(products)
 
-        crack_rate = round((cracked_boards / tot_boards) * 100, 2) if tot_boards else 0
+        # 3) prepare counters
+        status_counts  = Counter()
+        history_counts = Counter()
+        history_raw    = {}       # collect timestamp → status
 
-        return render_template(
-            'cracked_board_rate.html',
-            # these Jinja vars are only fallback; our JS will re‑fetch live JSON
-            cracked=cracked_boards,
-            total=tot_boards,
-            rate=crack_rate
-        )
+        # 4) compute cutoff
+        now    = datetime.now()
+        cutoff = now - timedelta(days=days) if days > 0 else None
+
+        # 5) iterate all products
+        for p in products:
+            sbt = p.get('status_by_timestamp', {})
+            filtered_statuses = []
+
+            for ts, st in sbt.items():
+                # parse ISO timestamp
+                try:
+                    dt = datetime.fromisoformat(ts)
+                except ValueError:
+                    dt = datetime.strptime(ts, '%Y-%m-%dT%H-%M-%S')
+
+                # only keep if inside the window
+                if cutoff is None or dt >= cutoff:
+                    status_lower = st.lower()
+                    filtered_statuses.append(status_lower)
+                    history_raw[ts] = status_lower
+
+            # update aggregate counts
+            history_counts.update(filtered_statuses)
+            if 'cracked' in filtered_statuses:
+                status_counts['cracked'] += 1
+            elif 'normal' in filtered_statuses:
+                status_counts['healthy'] += 1
+            else:
+                status_counts['unknown'] += 1
+
+        # 6) return everything
+        return jsonify({
+            'total_boards':   total_boards,
+            'status_counts':  dict(status_counts),
+            'history_counts': dict(history_counts),
+            'history_raw':    history_raw
+        })
+
     except Exception as e:
-        return f"Error reading product data: {e}", 500
+        return jsonify({'error': str(e)}), 500
+# 1️⃣ Page Route
+@app.route('/inspection_accuracy')
+def inspection_accuracy():
+    return render_template('inspection_accuracy.html')
+
+
+# 2️⃣ List all trained timestamps
+@app.route('/api/inspection_timestamps')
+def inspection_timestamps():
+    base = 'trained_models'
+    if not os.path.isdir(base):
+        return jsonify([])
+
+    runs = [
+        d for d in os.listdir(base)
+        if os.path.isdir(os.path.join(base, d))
+    ]
+    runs.sort()   # so oldest→newest
+    return jsonify(runs)
+
+
+# 3️⃣ Return best_metrics for one timestamp
+@app.route('/api/inspection_accuracy_data')
+def inspection_accuracy_data():
+    ts = request.args.get('timestamp')
+    path = os.path.join('trained_models', ts, 'best_metrics.json')
+    if not os.path.isfile(path):
+        return jsonify({'error': 'Not found'}), 404
+
+    with open(path) as f:
+        data = json.load(f)
+    return jsonify(data)
+    
+@app.route('/api/best_metrics')
+def best_metrics_api():
+    import os, json
+    from flask import jsonify
+
+    base = 'trained_models'
+    if not os.path.isdir(base):
+        return jsonify({'error': 'trained_models directory not found'}), 404
+
+    # find all timestamp‐named subfolders
+    runs = [d for d in os.listdir(base)
+            if os.path.isdir(os.path.join(base, d))]
+    if not runs:
+        return jsonify({'error': 'No training runs found'}), 404
+
+    runs.sort()  # lexicographic works for YYYYmmdd_HHMMSS
+    latest = runs[-1]
+    path   = os.path.join(base, latest, 'best_metrics.json')
+    if not os.path.isfile(path):
+        return jsonify({'error': 'best_metrics.json not found'}), 404
+
+    with open(path) as f:
+        data = json.load(f)
+    return jsonify(data)
+
 
 @app.route('/api/analytics_data')
 def analytics_data():
