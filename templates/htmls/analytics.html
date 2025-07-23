@@ -24,24 +24,24 @@
 </div>
 
 <div class="row my-4">
-   <!-- Inspection Accuracy -->
-   <div class="col-md-4 mb-4">
+  <!-- Inspection Accuracy -->
+  <div class="col-md-4 mb-4">
     <a href="{{ url_for('inspection_accuracy') }}" class="text-decoration-none text-dark">
       <div class="card h-100 shadow border-0">
-      <div class="card-body">
-        <h5 class="card-title">
-          <i class="bi bi-bullseye"></i> Inspection Accuracy
-        </h5>
+        <div class="card-body">
+          <h5 class="card-title">
+            <i class="bi bi-bullseye"></i> Inspection Accuracy
+          </h5>
 
-        <!-- ◀ NEW: Numeric accuracy display -->
-        <div class="text-center mb-3">
-          <h3 id="accuracyValue" class="fw-bold">--%</h3>
+          <!-- ◀ NEW: Numeric accuracy display -->
+          <div class="text-center mb-3">
+            <h3 id="accuracyValue" class="fw-bold">--%</h3>
+          </div>
+
+          <canvas id="accuracyGauge"></canvas>
         </div>
-
-        <canvas id="accuracyGauge"></canvas>
       </div>
-    </div>
-  </a> 
+    </a>
   </div>
 
 
@@ -77,22 +77,24 @@
   </div>
 
   <!-- Thermal Trends -->
- <div class="col-md-4 mb-4">
-  <a href="{{ url_for('thermal_trends') }}" class="text-decoration-none text-dark">
-     <div class="card-body">
-       <h5 class="card-title">
-         <i class="bi bi-thermometer-half"></i> Thermal Trends
-       </h5>
+  <div class="col-md-4 mb-4">
+    <a href="{{ url_for('thermal_trends') }}" class="text-decoration-none text-dark">
+      <div class="card h-100 shadow border-0">
+        <div class="card-body">
+          <h5 class="card-title">
+            <i class="bi bi-thermometer-half"></i> Thermal Trends
+          </h5>
 
-       <!-- Average Temperature by Area -->
-       <canvas id="thermalAvgChart" class="mb-4"></canvas>
+          <!-- Average Temperature by Area -->
+          <canvas id="thermalAvgChart" class="mb-4"></canvas>
 
-       <!-- Temperature Distribution Histogram -->
-       <canvas id="thermalHistChart"></canvas>
-     </div>
-   </div>
+          <!-- Temperature Distribution Histogram -->
+          <canvas id="thermalHistChart"></canvas>
+        </div>
+      </div>
+  </div>
   </a>
- </div>
+</div>
 </div>
 {% endblock %}
 
@@ -138,16 +140,20 @@
             <i class="bi bi-question-circle"></i> ${data.unknown_boards}
           </span><br><small>Unknown</small>
         </div>
-        <div class="col-md-2 mb-2">
-          <span class="badge bg-info text-dark fs-5">
-            <i class="bi bi-images"></i> ${data.avg_images_per_board}
-          </span><br><small>Avg Images/Board</small>
-        </div>
-        <div class="col-md-2 mb-2">
-          <span class="badge bg-warning text-dark fs-5">
-            <i class="bi bi-image"></i> ${data.total_images}
-          </span><br><small>Total Images</small>
-        </div>
+      <!-- PDF Download inline, beside Unknown -->
+    <div class="col-md-2 mb-2">
+      <form action="{{ url_for('generate_report_route') }}" method="post"
+            class="d-flex flex-column align-items-center">
+        <select name="period" class="form-select form-select-sm mb-1" required>
+          <option value="" disabled selected>Period…</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+        <button type="submit" class="btn btn-b btn-primary">Generate Report</button>
+      </form>
+    </div>
+
       </div>
       <div class="row mt-3">
         <div class="col-12">
@@ -202,143 +208,143 @@
 
 
   // 4) Dynamic Inspection Accuracy gauge
-fetch('/api/best_metrics')
-  .then(r => r.json())
-  .then(data => {
-    if (data.error) {
-      console.error(data.error);
-      return;
-    }
-    const pct = Math.round(data.accuracy * 100);
-    const remainder = 100 - pct;
+  fetch('/api/best_metrics')
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        console.error(data.error);
+        return;
+      }
+      const pct = Math.round(data.accuracy * 100);
+      const remainder = 100 - pct;
 
-    // ◀ NEW: show percentage in the card
-    document.getElementById('accuracyValue').textContent = pct + '%';
+      // ◀ NEW: show percentage in the card
+      document.getElementById('accuracyValue').textContent = pct + '%';
 
-    let color;
-    if      (pct >  90) color = 'blue';
-    else if (pct >= 80) color = 'green';
-    else if (pct >= 50) color = 'yellow';
-    else                color = 'red';
+      let color;
+      if (pct > 90) color = 'blue';
+      else if (pct >= 80) color = 'green';
+      else if (pct >= 50) color = 'yellow';
+      else color = 'red';
 
-    new Chart(
-      document.getElementById('accuracyGauge'),
-      {
-        type: 'doughnut',
-        data: {
-          labels: ['Accuracy','Remaining'],
-          datasets: [{
-            data: [pct, remainder],
-            backgroundColor: [color, '#dee2e6']
-          }]
-        },
-        options: {
-          cutout: '80%',
-          plugins: {
-            tooltip: {
-              callbacks: { label: ctx => `${ctx.label}: ${ctx.parsed}%` }
+      new Chart(
+        document.getElementById('accuracyGauge'),
+        {
+          type: 'doughnut',
+          data: {
+            labels: ['Accuracy', 'Remaining'],
+            datasets: [{
+              data: [pct, remainder],
+              backgroundColor: [color, '#dee2e6']
+            }]
+          },
+          options: {
+            cutout: '80%',
+            plugins: {
+              tooltip: {
+                callbacks: { label: ctx => `${ctx.label}: ${ctx.parsed}%` }
+              }
             }
           }
         }
-      }
-    );
-  })
-  .catch(err => console.error('Failed to load best metrics', err));
+      );
+    })
+    .catch(err => console.error('Failed to load best metrics', err));
 
 
 
 
   // 5) Draw Thermal Trends charts
-fetch('/api/products_data')
-  .then(r => r.json())
-  .then(products => {
-    // aggregate all thermal readings by area
-    const areaTemps = {};
-    products.forEach(p => {
-      const tb = p.thermal_by_timestamp || {};
-      Object.values(tb).forEach(areaObj => {
-        Object.entries(areaObj).forEach(([area, grid]) => {
-          const flat = grid.flat();
-          areaTemps[area] = (areaTemps[area]||[]).concat(flat);
+  fetch('/api/products_data')
+    .then(r => r.json())
+    .then(products => {
+      // aggregate all thermal readings by area
+      const areaTemps = {};
+      products.forEach(p => {
+        const tb = p.thermal_by_timestamp || {};
+        Object.values(tb).forEach(areaObj => {
+          Object.entries(areaObj).forEach(([area, grid]) => {
+            const flat = grid.flat();
+            areaTemps[area] = (areaTemps[area] || []).concat(flat);
+          });
         });
       });
-    });
 
-    // ——— 1) Average temp per area ———
-    const areas    = Object.keys(areaTemps).sort();
-    const avgTemps = areas.map(a => {
-      const arr = areaTemps[a];
-      return arr.reduce((s,v)=>s+v,0)/arr.length;
-    });
+      // ——— 1) Average temp per area ———
+      const areas = Object.keys(areaTemps).sort();
+      const avgTemps = areas.map(a => {
+        const arr = areaTemps[a];
+        return arr.reduce((s, v) => s + v, 0) / arr.length;
+      });
 
-    new Chart(
-  document.getElementById('thermalAvgChart').getContext('2d'),
-  {
-    type: 'line',                   // ← line instead of bar
-    data: {
-      labels: areas,
-      datasets: [{
-        label: 'Avg Temp (°C)',
-        data: avgTemps,
-        fill: false,
-        tension: 0.3                  // smooth curve (optional)
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { display: false },
-        title: {
-          display: true,
-          text: 'Average Temperature by Area'
-        }
-      },
-      scales: {
-        y: {
-          title: { display: true, text: 'Temperature (°C)' }
-        },
-        x: {
-          title: { display: true, text: 'Area' }
-        }
-      }
-    }
-  }
-);
-
-
-    // ——— 2) Temperature distribution histogram ———
-    let below=0, normal=0, above=0;
-    Object.values(areaTemps).flat().forEach(v => {
-      if (v < 25)      below++;
-      else if (v > 38) above++;
-      else             normal++;
-    });
-
-    new Chart(
-      document.getElementById('thermalHistChart').getContext('2d'),
-      {
-        type: 'bar',
-        data: {
-          labels: ['Below 25°C','25–38°C','Above 38°C'],
-          datasets: [{
-            label: 'Count',
-            data: [below, normal, above]
-          }]
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: { display: false },
-            title: {
-              display: true,
-              text: 'Temperature Distribution'
+      new Chart(
+        document.getElementById('thermalAvgChart').getContext('2d'),
+        {
+          type: 'line',                   // ← line instead of bar
+          data: {
+            labels: areas,
+            datasets: [{
+              label: 'Avg Temp (°C)',
+              data: avgTemps,
+              fill: false,
+              tension: 0.3                  // smooth curve (optional)
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              title: {
+                display: true,
+                text: 'Average Temperature by Area'
+              }
+            },
+            scales: {
+              y: {
+                title: { display: true, text: 'Temperature (°C)' }
+              },
+              x: {
+                title: { display: true, text: 'Area' }
+              }
             }
           }
         }
-      }
-    );
-  })
-  .catch(err => console.error('Thermal data load failed', err));
+      );
+
+
+      // ——— 2) Temperature distribution histogram ———
+      let below = 0, normal = 0, above = 0;
+      Object.values(areaTemps).flat().forEach(v => {
+        if (v < 25) below++;
+        else if (v > 38) above++;
+        else normal++;
+      });
+
+      new Chart(
+        document.getElementById('thermalHistChart').getContext('2d'),
+        {
+          type: 'bar',
+          data: {
+            labels: ['Below 25°C', '25–38°C', 'Above 38°C'],
+            datasets: [{
+              label: 'Count',
+              data: [below, normal, above]
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              title: {
+                display: true,
+                text: 'Temperature Distribution'
+              }
+            }
+          }
+        }
+      );
+    })
+    .catch(err => console.error('Thermal data load failed', err));
 
 </script>
 {% endblock %}

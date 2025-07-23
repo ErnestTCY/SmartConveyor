@@ -5,7 +5,7 @@ import threading
 import asyncio
 import cv2
 import numpy as np
-from flask import Flask, render_template, request, redirect, url_for, Response, jsonify
+from flask import Flask, render_template, request, redirect, url_for, Response, jsonify, send_file
 from ultralytics import YOLO
 import websockets
 import paho.mqtt.client as mqtt
@@ -22,6 +22,9 @@ import socket
 from collections import Counter
 from pathlib import Path  
 from collections import defaultdict
+from pdf_generator import generate_report
+from flask import flash
+
 
 # === App Setup ===
 app = Flask(__name__, template_folder='templates/htmls', static_folder='static')
@@ -355,6 +358,7 @@ def load_reasoning(serial_number, timestamp_dir):
             return json.load(f).get('reasoning', None)
     return None
 
+
 def generate_gemini_reasoning(product, timestamp=None):
     try:
         serial_number = product['serial_number']
@@ -362,67 +366,102 @@ def generate_gemini_reasoning(product, timestamp=None):
             timestamp = get_latest_timestamp_directory(serial_number)
         if not timestamp:
             return "No images found for analysis."
+
+        # — Gather image paths & crack detections as before —
         images = get_images_from_timestamp_directory(serial_number, timestamp)
         if not images:
             return "No images found in the selected timestamp directory."
-        first_image_filename = os.path.basename(images[0])
-        existing_labels = load_yolo_labels(serial_number, timestamp, first_image_filename)
+
+        first_image = os.path.basename(images[0])
+        existing_labels = load_yolo_labels(serial_number, timestamp, first_image)
         if existing_labels is None:
             all_detections = process_all_images_in_timestamp(serial_number, timestamp)
         else:
             all_detections = get_crack_description_from_labels(serial_number, timestamp)
+
+        # Format crack info
         if all_detections:
-            crack_info_parts = []
-            for i, detection in enumerate(all_detections):
-                crack_info_parts.append(
-                    f"- Image: {detection['image']}, Class: {detection['class']}, "
-                    f"Confidence: {detection['confidence']}, Position: ({detection['position']}), "
-                    f"Size: {detection['size']}"
-                )
-            crack_info = "\n".join(crack_info_parts)
+            crack_info = "\n".join(
+                f"- Image: {d['image']}, Class: {d['class']}, "
+                f"Conf: {d['confidence']}, Pos: ({d['position']}), Size: {d['size']}"
+                for d in all_detections
+            )
         else:
             crack_info = "No cracks detected by YOLOv8 in any of the images."
-        # Get status for the current timestamp
-        status = None
-        if 'status_by_timestamp' in product and timestamp in product['status_by_timestamp']:
-            status = product['status_by_timestamp'][timestamp]
+
+        # — NEW: load all thermal JSONs under /thermal/area*.json —
+        thermal_dir = os.path.join(
+            'static', 'product_images', serial_number, timestamp, 'thermal'
+        )
+        thermal_data = {}
+        if os.path.isdir(thermal_dir):
+            for jf in sorted(glob.glob(os.path.join(thermal_dir, "area*.json"))):
+                try:
+                    payload = json.loads(Path(jf).read_text())
+                    area_name = Path(jf).stem       # e.g. "area1"
+                    thermal_data[area_name] = payload.get("raw_grid", [])
+                except Exception:
+                    # skip bad files
+                    continue
+
+        # Format thermal info into text for the prompt
+        if thermal_data:
+            thermal_info = "\n".join(
+                f"- {area}: {grid}"
+                for area, grid in thermal_data.items()
+            )
         else:
-            status = load_status(serial_number, timestamp)
-        if not status:
-            status = 'unknown'
+            thermal_info = "No thermal JSON data available for this timestamp."
 
+        # — Status lookup as before —
+        status = (
+            product.get('status_by_timestamp', {})
+                   .get(timestamp)
+            or load_status(serial_number, timestamp)
+            or 'unknown'
+        )
+
+        # — Build the prompt, embedding the crack_info AND thermal_info —
         prompt = f"""
+Analysis of Solarboard Damage
+Serial Number: {serial_number}
+Timestamp: {timestamp}
 
-        Analysis of Solarboard Damage: (state the serial number and timestamp at first)
-        Serial Number: {serial_number}
-        Timestamp: {timestamp}
-        You are an expert solar board diagnostics assistant.
-        Analyze the cause of damage to the solarboard below:
-        Model Name: {product['model_name']}
-        Status: {status}
-        Images Analyzed: {len(images)} images from timestamp {timestamp}
+You are an expert solar board diagnostics assistant.
 
-        YOLOv8 Detection Summary (All Images):
-        {crack_info}
-        Based on the above detection and production parameters, identify likely causes for the crack(s) and give actionable recommendations.
+Model Name: {product.get('model_name','<unknown>')}
+Status: {status}
+Images Analyzed: {len(images)}
 
-        Production parameters to consider:
-        - Lamination Pressure (ideal: 50–100 N/cm²; >120 N/cm² risks cracking)
-        - Lamination Temperature (140–155°C; >160°C stresses cells)
-        - Soldering Temperature (240–260°C; >270°C risks thermal fracture)
-        - Cell Stringing Speed (~0.5–1.2 m/s; too fast causes misalignment stress)
-        - Handling Force (<5 N; >10 N can crack corners)
-        - Vacuum Level before lamination (≤1 mbar recommended)
-        - Cooling Rate post-lamination (1–3°C/min; >5°C/min induces thermal mismatch)
-        - Cell Thickness (<150 μm increases fragility)
+YOLOv8 Detection Summary:
+{crack_info}
 
-        Include estimated faulty parameter values if possible.
-        """
+Thermal Sensor Data (raw grids):
+{thermal_info}
+
+Based on the above detection and thermal readings, identify likely causes for any cracks or hotspots and give actionable recommendations.
+
+Production parameters to consider:
+- Lamination Pressure (ideal: 50–100 N/cm²; >120 N/cm² risks cracking)
+- Lamination Temperature (140–155°C; >160°C stresses cells)
+- Soldering Temperature (240–260°C; >270°C risks thermal fracture)
+- Cell Stringing Speed (~0.5–1.2 m/s; too fast causes misalignment stress)
+- Handling Force (<5 N; >10 N can crack corners)
+- Vacuum Level before lamination (≤1 mbar recommended)
+- Cooling Rate post-lamination (1–3°C/min; >5°C/min induces thermal mismatch)
+- Cell Thickness (<150 μm increases fragility)
+
+Include estimated faulty parameter values if possible.
+"""
+
         model = genai.GenerativeModel("models/gemini-1.5-flash")
         response = model.generate_content(prompt)
         reasoning_text = response.text.strip()
+
+        # save out so you can re‑load later
         save_reasoning(serial_number, timestamp, reasoning_text)
         return reasoning_text
+
     except Exception as e:
         print(f"[Gemini ERROR] {e}")
         return "Gemini reasoning failed."
@@ -1225,6 +1264,30 @@ def inspection_timestamps():
 @app.route('/thermal_trends')
 def thermal_trends():
     return render_template('thermal_trends.html')
+
+@app.route('/generate_report', methods=['POST'])
+def generate_report_route():
+    period = request.form.get('period')
+    
+    if period not in ('daily','weekly','monthly'):
+        flash('Please select a valid report period.', 'danger')
+        return redirect(url_for('analytics'))
+
+    try:
+        pdf_path = generate_report(
+        period,
+        inspection_line="Smart Conveyor Automated System",
+        inspector="Automated System"  # or any other name you want
+    )
+    except Exception as e:
+        flash(f"Failed to generate PDF: {e}", 'danger')
+        return redirect(url_for('analytics'))
+
+    # serve file as download
+    return send_file(pdf_path,
+                     as_attachment=True,
+                     download_name=os.path.basename(pdf_path),
+                     mimetype='application/pdf')
 
 
 @app.route('/api/thermal_trends_data')
