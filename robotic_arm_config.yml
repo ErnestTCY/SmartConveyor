@@ -1,0 +1,83 @@
+# Robotic Arm Configuration File
+# This file contains the parameters for a 6-DOF robotic arm.
+# Modify the values below to match your specific arm configuration.
+
+# Arm Configuration
+arm:
+  # List of links (segments) in the robotic arm
+  links:
+    - name: base_rotation       # First joint: Rotates the base of the arm
+      length: 0                 # Length of the base (usually 0 since it's a rotational joint)
+      joint_type: revolute      # Joint type: revolute (rotational) or prismatic (linear)
+      axis: z                   # Axis of rotation (x, y, or z)
+      min_angle: 0              # Minimum angle in degrees
+      max_angle: 180            # Maximum angle in degrees
+
+    - name: shoulder            # Second joint: Controls the shoulder pitch
+      length: 400               # Length of the first arm segment (in mm)
+      joint_type: revolute
+      axis: y                   # Rotates around the Y-axis
+      min_angle: 0              # Minimum angle in degrees
+      max_angle: 180            # Maximum angle in degrees
+
+    - name: elbow               # Third joint: Controls the elbow pitch
+      length: 400               # Length of the second arm segment (in mm)
+      joint_type: revolute
+      axis: y                   # Rotates around the Y-axis
+      min_angle: 0              # Minimum angle in degrees
+      max_angle: 180            # Maximum angl	e in degrees
+
+    - name: wrist_rotation      # Fourth joint: Rotates the wrist
+      length: 30                # Length of the wrist segment (in mm)
+      joint_type: revolute
+      axis: x                   # Rotates around the X-axis
+      min_angle: 0              # Minimum angle in degrees
+      max_angle: 180            # Maximum angle in degrees
+
+    - name: end_effector        # Sixth joint: Controls the end effector (e.g., gripper)
+      length: 60                # Length of the end effector (in mm)
+      joint_type: revolute
+      axis: z                   # Rotates around the Z-axis
+      min_angle: 95             # Minimum angle in degrees
+      max_angle: 180            # Maximum angle in degrees
+
+# Servo Configuration
+# This section defines the servo motors used to control each joint.
+servos:
+  - channel: 1                  # PCA9685 channel number for this servo
+    name: base_rotation         # Name of the joint this servo controls
+    min_pulse: 150             # Minimum PWM pulse length (for 0 degrees)
+    max_pulse: 600              # Maximum PWM pulse length (for 180 degrees)
+    direction: 1                # +1 for same direction, -1 for opposite direction
+
+  - channel: 2
+    name: shoulder
+    min_pulse: 150
+    max_pulse: 600
+    direction: -1
+
+  - channel: 3
+    name: elbow
+    min_pulse: 150
+    max_pulse: 600
+    direction: -1
+
+  - channel: 4
+    name: wrist_rotation
+    min_pulse: 150
+    max_pulse: 600
+    direction: -1
+
+  - channel: 5
+    name: end_effector
+    min_pulse: 238              # Minimum PWM pulse length (for 95 degrees)
+    max_pulse: 600              # Maximum PWM pulse length (for 180 degrees)
+    direction: -1
+
+# Camera Configuration (Optional)
+# This section defines the camera parameters for object detection.
+camera:
+  frame_width: 640              # Width of the camera frame in pixels
+  frame_height: 480             # Height of the camera frame in pixels
+  fov_x: 90                     # Horizontal field of view in degrees
+  fov_y: 65                     # Vertical field of view in degrees
