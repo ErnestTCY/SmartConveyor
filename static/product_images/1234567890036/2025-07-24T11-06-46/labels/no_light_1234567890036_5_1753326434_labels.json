@@ -1,0 +1,25 @@
+{
+  "image_filename": "no_light_1234567890036_5_1753326434.jpg",
+  "timestamp": "2025-07-24T11:07:17.122007",
+  "detections": [
+    {
+      "class": "solarboard",
+      "confidence": 0.58,
+      "position": {
+        "x": 522,
+        "y": 264
+      },
+      "size": {
+        "width": 117,
+        "height": 215
+      },
+      "bbox": [
+        522.3570556640625,
+        264.4517822265625,
+        639.9918212890625,
+        480.0
+      ]
+    }
+  ],
+  "total_detections": 1
+}

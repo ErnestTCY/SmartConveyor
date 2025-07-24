@@ -64,27 +64,43 @@ def generate_pie_chart(labels, sizes, title, output_path):
 class PDFReport(FPDF):
     def __init__(self):
         super().__init__()
-        self.total_crack_count   = 0
-        self.total_crack_scans   = 0
-        self.total_thermal_count = 0
-        self.total_thermal_points= 0
+        # existing stats...
+        self.period_start = ''
+        self.period_end = ''
+        self.period_reasoning = ''
+
+    def set_period(self, start: str, end: str):
+        self.period_start = start
+        self.period_end = end
+
+    def set_report_reasoning(self, reasoning: str):
+        self.period_reasoning = reasoning
 
     def header(self):
-        # Only on the very first page
         if self.page_no() == 1:
-            self.set_font("Helvetica", 'B', 16)
-            self.cell(0, 10, "Solar Panel Inspection Report", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.set_font('Helvetica', 'B', 16)
+            self.cell(0, 10, 'Solar Panel Inspection Report', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             self.ln(5)
+            # Display period bounds
+            if self.period_start and self.period_end:
+                self.set_font('Helvetica', '', 12)
+                self.cell(0, 8, f'Reporting Period: {self.period_start} to {self.period_end}', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.ln(5)
 
-    def cover_page(self,
-                   total_panels,
-                   inspection_line,
-                   inspector,
-                   avg_crack_rate,
-                   avg_thermal_rate,
-                   crack_pie_data=None,
-                   thermal_pie_data=None,
-                   suggestion=""):
+    def cover_page(self, total_panels, inspection_line, inspector,
+                   avg_crack_rate, avg_thermal_rate,
+                   crack_pie_data=None, thermal_pie_data=None):
+        # existing cover content...
+        # After summary, insert period reasoning
+        if self.period_reasoning:
+            self.set_font('Helvetica', 'B', 12)
+            self.cell(0, 8, 'Period Reasoning', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.set_font('Helvetica', '', 11)
+            safe_text = self.period_reasoning.encode('latin-1', errors='replace').decode('latin-1')
+            self.multi_cell(0, 8, safe_text)
+            self.ln(5)
+        # continue with pie charts and suggestion...
+
         """
         Build the report cover with summary stats and small pie charts.
         """
@@ -135,18 +151,6 @@ class PDFReport(FPDF):
                 os.remove(therm_chart)
         self.ln(10)
 
-        # Suggested solution
-             # Suggested solution
-        if suggestion:
-            self.set_font("Helvetica", 'B', 11)
-            self.cell(0, 8, "Suggested Solution:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            self.set_font("Helvetica", '', 11)
-
-            # sanitize any non‑Latin1 characters (e.g. “μ”) so Helvetica can render them
-            safe_suggestion = suggestion.encode('latin-1', errors='replace').decode('latin-1')
-            self.multi_cell(0, 8, safe_suggestion)
-
-        self.ln(5)
 
 
     def product_section(self, panel):
@@ -251,21 +255,56 @@ class PDFReport(FPDF):
                 os.remove(therm_chart)
             self.ln(4)
 
-        # — Panel Image —
-        img = panel.get("image_path")
-        if img and os.path.exists(img):
+        # — Panel Images — 
+        imgs = panel.get("image_paths", [])
+        if imgs:
             self.set_font("Helvetica", 'B', 12)
-            self.cell(0, 10, "Panel Image:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            try:
-                self.image(img, w=100)
-            except:
-                self.set_font("Helvetica", 'I', 10)
-                self.cell(0, 10, f"[Could not load image: {img}]",
-                          new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.cell(0, 10, "Panel Images:", ln=True)
+            self.ln(2)
+
+            # calculate image size & spacing
+            per_row = 3
+            gutter  = 5  # space between images
+            img_w   = (self.w - 2*self.l_margin - (per_row-1)*gutter) / per_row
+            img_h   = img_w  # make them square; adjust if you prefer original aspect
+
+            for idx, img_path in enumerate(imgs):
+                # compute x,y for this slot
+                col = idx % per_row
+                if col == 0:
+                    y = self.get_y()
+                x = self.l_margin + col*(img_w + gutter)
+
+                # draw image (or placeholder text on error)
+                try:
+                    self.image(img_path, x=x, y=y, w=img_w, h=img_h)
+                except Exception:
+                    self.set_xy(x, y)
+                    self.set_font("Helvetica", 'I', 10)
+                    self.multi_cell(img_w, 8, "[Image load error]", align='C')
+
+                # when we’ve placed the last in a row, advance to next line
+                if col == per_row - 1:
+                    self.ln(img_h + gutter)
+            # if the last row wasn’t full, still move down
+            if len(imgs) % per_row != 0:
+                self.ln(img_h + gutter)
         else:
             self.set_font("Helvetica", 'I', 10)
-            self.cell(0, 10, "[No image available]",
-                      new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.cell(0, 10, "[No images available]", ln=True)
+
+        self.ln(4)
+
+
+        # — Inspection Reasoning —
+        reasoning = find_latest_reasoning_json(panel.get('serial_number',''))
+        if reasoning:
+            self.set_font('Helvetica', 'B', 12)
+            self.cell(0, 10, 'Inspection Reasoning:', ln=True)
+            self.set_font('Helvetica', '', 11)
+            safe = reasoning.encode('latin-1', errors='replace').decode('latin-1')
+            self.multi_cell(0, 8, safe)
+            self.ln(5)
 
         # New page
         self.add_page()
@@ -273,21 +312,22 @@ class PDFReport(FPDF):
 # ── Report Generation Entry Point ──────────────────────────────────────────────
 
 def generate_report(period: str,
-                    inspection_line="Line 1",
-                    inspector="Automated System") -> str:
-    """
-    Build a PDF report for 'daily', 'weekly', or 'monthly' data slices.
-    Returns the filesystem path to the new PDF.
-    """
+                    inspection_line='Line 1',
+                    inspector='Automated System',
+                    period_bounds=None,
+                    period_reasoning='') -> str:
     now = datetime.now()
-    if period == "daily":
-        cutoff = now - timedelta(days=1)
-    elif period == "weekly":
-        cutoff = now - timedelta(weeks=1)
-    elif period == "monthly":
-        cutoff = now - timedelta(days=30)
+    if period == 'daily': cutoff = now - timedelta(days=1)
+    elif period == 'weekly': cutoff = now - timedelta(weeks=1)
+    elif period == 'monthly': cutoff = now - timedelta(days=30)
+    else: raise ValueError(f'Unknown period: {period}')
+
+    start_str, end_str = ('','')
+    if period_bounds:
+        start_str, end_str = period_bounds
     else:
-        raise ValueError(f"Unknown period: {period}")
+        start_str = cutoff.strftime('%Y-%m-%d %H:%M:%S')
+        end_str   = now.strftime('%Y-%m-%d %H:%M:%S')
 
     # 1) load all products
     with open(DATA_PATH, "r", encoding="utf-8") as f:
@@ -319,9 +359,20 @@ def generate_report(period: str,
             panel = p.copy()
             panel['status_by_timestamp']  = sbt
             panel['thermal_by_timestamp'] = tbt
-            panel['image_path']           = p.get("latest_images", [""])[0]
-            panel['timestamp']            = max(list(sbt.keys()) + list(tbt.keys()))
-            filtered.append(panel)
+            panel['timestamp'] = max(list(sbt.keys()) + list(tbt.keys()))
+            serial = panel["serial_number"]
+            ts     = panel['timestamp']
+            img_dir = os.path.join("static", "product_images", serial, ts)
+
+# collect all image files in that folder
+        panel['image_paths'] = []
+        if os.path.isdir(img_dir):
+            for fn in sorted(os.listdir(img_dir)):
+                if fn.lower().endswith(('.jpg','.jpeg','.png','.bmp','.tiff')):
+                    panel['image_paths'].append(os.path.join(img_dir, fn))
+
+        filtered.append(panel)
+
 
 
     # 3) compute summary stats
@@ -351,16 +402,11 @@ def generate_report(period: str,
     # 5) build the PDF
     pdf = PDFReport()
     pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_period(start_str, end_str)
+    pdf.set_report_reasoning(period_reasoning)
     pdf.add_page()
 
     # grab one reasoning example
-    suggestion = ""
-    for panel in filtered:
-        txt = find_latest_reasoning_json(panel["serial_number"])
-        if txt:
-            suggestion = txt
-            break
-
     pdf.cover_page(
         total_panels=total_panels,
         inspection_line=inspection_line,
@@ -368,8 +414,7 @@ def generate_report(period: str,
         avg_crack_rate=avg_crack_rate,
         avg_thermal_rate=avg_thermal_rate,
         crack_pie_data=(total_cracked, total_scans-total_cracked),
-        thermal_pie_data=(total_over, total_points-total_over),
-        suggestion=suggestion
+        thermal_pie_data=(total_over, total_points-total_over)
     )
 
     for panel in filtered:

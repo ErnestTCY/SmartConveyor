@@ -1069,95 +1069,98 @@ def upload_yolo_images():
     serial_number = str(data.get('serial_number', '')).strip()
     timestamp     = str(data.get('timestamp', '')).strip()
     images        = data.get('images', {})
-    model_name    = data.get('model_name', '').strip()
+    model_name    = str(data.get('model_name', '')).strip()
 
     if not serial_number or not timestamp or not images:
         return jsonify({'error': 'Missing serial_number, timestamp, or images'}), 400
 
-    # 1) Save incoming images
+    # Base paths
     base_dir    = os.path.join('static', 'product_images', serial_number, timestamp)
     labels_dir  = os.path.join(base_dir, 'labels')
     thermal_dir = os.path.join(base_dir, 'thermal')
-    os.makedirs(base_dir, exist_ok=True)
     os.makedirs(labels_dir, exist_ok=True)
     os.makedirs(thermal_dir, exist_ok=True)
 
     saved = []
+
     for key, info in images.items():
-        fn = info.get('filename')
+        fn  = info.get('filename')
         b64 = info.get('data')
         if not fn or not b64:
             continue
+
         raw = base64.b64decode(b64)
 
         if key == 'thermal':
+            # (unchanged) save full‐grid JSON
             path = os.path.join(thermal_dir, fn)
-            # also write raw_grid JSON
+            with open(path, 'wb') as f:
+                f.write(raw)
             grid = info.get('raw_grid')
             if grid:
                 loc = fn.split('_')[2]
                 with open(os.path.join(thermal_dir, f"area{loc}.json"), 'w') as jf:
                     json.dump({
                         'serial_number': serial_number,
-                        'timestamp': timestamp,
-                        'raw_grid': grid
+                        'timestamp':     timestamp,
+                        'raw_grid':      grid
                     }, jf, indent=2)
-        elif key in ('light','no_light'):
-            new_dir = os.path.join('static','new_images')
-            os.makedirs(new_dir, exist_ok=True)
-            path = os.path.join(new_dir, fn)
-        else:
-            # covers 'yolo' and any others
-            path = os.path.join(base_dir, fn)
 
-        if not os.path.exists(path):
-            with open(path, 'wb') as f:
+        elif key == 'no_light':
+            # 1) save raw for detection
+            ts_path = os.path.join(base_dir, fn)
+            with open(ts_path, 'wb') as f:
                 f.write(raw)
-        saved.append(path)
 
-    # 2) Determine new status (crack > scratch > normal)
+            # 2) copy raw into new_images for self‑learn
+            new_dir = os.path.join('static', 'new_images')
+            os.makedirs(new_dir, exist_ok=True)
+            copy_path = os.path.join(new_dir, fn)
+            with open(copy_path, 'wb') as f:
+                f.write(raw)
+            saved.append(copy_path)
+
+            # 3) run YOLO detection on the timestamp image
+            results = model.predict(source=ts_path, conf=0.5, verbose=False)
+
+            # 4) save JSON labels
+            save_yolo_labels(serial_number, timestamp, fn, results)
+
+            # 5) overwrite timestamp image with annotated boxes
+            if results and results[0].boxes:
+                annotated = results[0].plot()   # draws boxes on the image
+                cv2.imwrite(ts_path, annotated)
+
+        else:
+            # ignore any 'yolo_*' or 'light' keys from the Pi
+            continue
+
+    # update overall status & products.json
     new_status = update_status_json(serial_number, timestamp)
 
-    # 3) Sync into products.json
     products = load_products()
-    prod = next((p for p in products if p.get('serial_number')==serial_number), None)
+    prod = next((p for p in products if p.get('serial_number') == serial_number), None)
     if not prod:
-        prod = {
-            'serial_number': serial_number,
-            'model_name': model_name or 'unknown yet',
-            'status': new_status,
-            'status_by_timestamp': {}
-        }
-        products.append(prod)
+        products.append({
+            'serial_number':       serial_number,
+            'model_name':          model_name or 'unknown yet',
+            'status':              new_status,
+            'status_by_timestamp': {timestamp: new_status}
+        })
     else:
-        # only overwrite model_name if provided
         if model_name:
             prod['model_name'] = model_name
         prod['status'] = new_status
-
-    # record per‑timestamp status
-    sbt = prod.setdefault('status_by_timestamp', {})
-    sbt[timestamp] = new_status
+        prod.setdefault('status_by_timestamp', {})[timestamp] = new_status
 
     save_products(products)
 
-    # 4) Run YOLO on any “yolo_*.jpg” with no existing labels
-    for fn in os.listdir(base_dir):
-        if fn.startswith('yolo_') and fn.lower().endswith('.jpg'):
-            img_path   = os.path.join(base_dir, fn)
-            label_path = os.path.join(labels_dir, fn.replace('.jpg','_labels.json'))
-            if not os.path.exists(label_path):
-                try:
-                    results = model.predict(source=img_path, conf=0.5, verbose=False)
-                    save_yolo_labels(serial_number, timestamp, fn, results)
-                except Exception as e:
-                    print(f"[YOLO ERROR] {fn}: {e}")
-
     return jsonify({
-        'success': True,
+        'success':      True,
         'saved_images': saved,
-        'status': new_status
+        'status':       new_status
     })
+
 
 @app.route('/product/<serial_number>/refresh_status/<timestamp>', methods=['POST'])
 def refresh_status(serial_number, timestamp):
@@ -1308,26 +1311,51 @@ def thermal_trends():
 @app.route('/generate_report', methods=['POST'])
 def generate_report_route():
     period = request.form.get('period')
-    
     if period not in ('daily','weekly','monthly'):
         flash('Please select a valid report period.', 'danger')
         return redirect(url_for('analytics'))
 
+    # 2. Compute period bounds for display and reasoning
+    now = datetime.now()
+    if period == 'daily':
+        cutoff = now - timedelta(days=1)
+    elif period == 'weekly':
+        cutoff = now - timedelta(weeks=1)
+    else:  # monthly
+        cutoff = now - timedelta(days=30)
+    start_str = cutoff.strftime('%Y-%m-%d %H:%M:%S')
+    end_str   = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    # 3. Generate LLM reasoning about this period
+    prompt = f"""
+Report Period Analysis Summary
+Period Start: {start_str}
+Period End:   {end_str}
+
+As an expert assistant, explain why choosing this period is valuable for inspection reporting, and what key insights the report will highlight based on status and thermal data within this timeframe. Generate in 2 paragraphs
+"""
+    model = genai.GenerativeModel('models/gemini-1.5-flash')
+    period_reasoning = model.generate_content(prompt).text.strip()
+
+    # 4. Generate the PDF with additional period info
     try:
         pdf_path = generate_report(
-        period,
-        inspection_line="Smart Conveyor Automated System",
-        inspector="Automated System"  # or any other name you want
-    )
+            period,
+            inspection_line='Smart Conveyor Automated System',
+            inspector='Automated System',
+            period_bounds=(start_str, end_str),
+            period_reasoning=period_reasoning
+        )
     except Exception as e:
-        flash(f"Failed to generate PDF: {e}", 'danger')
+        app.logger.error(f'Failed to generate PDF: {e}')
         return redirect(url_for('analytics'))
 
-    # serve file as download
-    return send_file(pdf_path,
-                     as_attachment=True,
-                     download_name=os.path.basename(pdf_path),
-                     mimetype='application/pdf')
+    return send_file(
+        pdf_path,
+        as_attachment=True,
+        download_name=os.path.basename(pdf_path),
+        mimetype='application/pdf'
+    )
 
 
 @app.route('/api/thermal_trends_data')
@@ -1492,5 +1520,5 @@ if __name__ == "__main__":
     host_ip = socket.gethostbyname(socket.gethostname())
     port = 5000
     print(f"\n============================================\nServer running at: http://{host_ip}:{port}\n============================================\n")
-    app.run(host="0.0.0.0", port=port, debug=False) 
+    app.run(host="0.0.0.0", port=port, debug=True) 
 
