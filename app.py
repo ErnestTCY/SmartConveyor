@@ -558,9 +558,6 @@ def update_status_json(serial_number, timestamp_dir):
             if 'crack' in cls:
                 status = 'cracked'
                 break
-            elif 'scratch' in cls:
-                status = 'scratch'
-                # keep scanning in case there is also a crack
         if status == 'cracked':
             break
 
@@ -721,7 +718,8 @@ def get_product_thermal_history(serial_number):
 # === Flask Routes ===
 @app.route('/')
 def home():
-    return redirect(url_for('analytics'))
+    # Render the home.html template (no more redirect loops!)
+    return render_template('home.html')
 
 @app.route('/analytics')
 def analytics():
@@ -1457,7 +1455,7 @@ def analytics_data():
         total_boards = len(products)
 
         # 2) Prepare counters
-        status_counts  = {'cracked': 0, 'scratch': 0, 'healthy': 0, 'unknown': 0}
+        status_counts  = {'cracked': 0, 'healthy': 0, 'unknown': 0}
         history_counts = Counter()
 
         # 3) Iterate products and safely flatten statuses
@@ -1476,8 +1474,6 @@ def analytics_data():
             # 4) Classify each board by its worst‑seen status
             if 'cracked' in sts:
                 cls = 'cracked'
-            elif 'scratch' in sts:
-                cls = 'scratch'
             elif 'normal' in sts:
                 cls = 'healthy'
             else:
@@ -1493,7 +1489,6 @@ def analytics_data():
 
         # 7) Build and return payload
         cracked = status_counts['cracked']
-        scratch = status_counts['scratch']
         healthy = status_counts['healthy']
         unknown = status_counts['unknown']
 
@@ -1505,14 +1500,22 @@ def analytics_data():
             'cracked_percent': pct(cracked),
             'healthy_percent': pct(healthy),
             'status_counts':   status_counts,
-            'history_counts':  dict(history_counts),
-            'defect_rate':     pct(cracked + scratch)
+            'history_counts':  dict(history_counts)
         })
     except Exception as e:
         # Mirror your previous error handling
         print("read error:", e)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/mqtt_status', methods=['GET'])
+def api_mqtt_status():
+    """
+    Return JSON { status: 'ok' } when the MQTT client is connected,
+    or { status: 'disconnected' } otherwise.
+    """
+    return jsonify({
+        'status': 'ok' if mqtt_connected.is_set() else 'disconnected'
+    })
 
 
 

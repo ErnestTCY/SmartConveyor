@@ -1,5 +1,5 @@
-train: C:/Users/User/Desktop/hanging/Competition/T4G 022025/Dep4/train/images
-val: C:/Users/User/Desktop/hanging/Competition/T4G 022025/Dep4/val/images
+train: C:/Users/User/Desktop/hanging/Competition/T4G 022025/dep5/train/images
+val: C:/Users/User/Desktop/hanging/Competition/T4G 022025/dep5/val/images
 
 nc: 2
 names: ['crack', 'solarboard']

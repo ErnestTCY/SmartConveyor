@@ -68,7 +68,38 @@ class PDFReport(FPDF):
         self.period_start = ''
         self.period_end = ''
         self.period_reasoning = ''
+        self._first_panel = True
 
+    def header(self):
+        # — top‑right italic “No Changes Allowed” on every page —
+        self.set_font('Helvetica', 'I', 10)
+        # cell width=0 -> extend to right margin; new_x/new_y move to LMARGIN & NEXT line
+        self.cell(0, 5, '"No Changes Allowed"',
+                new_x=XPos.LMARGIN, new_y=YPos.NEXT,
+                align='R')
+
+        # — your existing first‑page title & period —
+        if self.page_no() == 1:
+            # set title color to navy blue
+            self.set_text_color(0, 0, 128)
+            self.set_font('Helvetica', 'B', 16)
+            self.cell(0, 10, 'Solar Panel Inspection Report',
+                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            # reset color back to black for everything else
+            self.set_text_color(0, 0, 0)
+            self.ln(5)
+            if self.period_start and self.period_end:
+                self.set_font('Helvetica', '', 12)
+                self.cell(0, 8,
+                        f'Reporting Period: {self.period_start} to {self.period_end}',
+                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.ln(5)
+
+    def footer(self):
+        # — bottom‑center page number —
+        self.set_y(-15)                 # 15 mm from bottom
+        self.set_font('Helvetica', 'I', 8)
+        self.cell(0, 10, f'Page {self.page_no()}', align='C')
     def set_period(self, start: str, end: str):
         self.period_start = start
         self.period_end = end
@@ -76,16 +107,7 @@ class PDFReport(FPDF):
     def set_report_reasoning(self, reasoning: str):
         self.period_reasoning = reasoning
 
-    def header(self):
-        if self.page_no() == 1:
-            self.set_font('Helvetica', 'B', 16)
-            self.cell(0, 10, 'Solar Panel Inspection Report', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            self.ln(5)
-            # Display period bounds
-            if self.period_start and self.period_end:
-                self.set_font('Helvetica', '', 12)
-                self.cell(0, 8, f'Reporting Period: {self.period_start} to {self.period_end}', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                self.ln(5)
+ 
 
     def cover_page(self, total_panels, inspection_line, inspector,
                    avg_crack_rate, avg_thermal_rate,
@@ -150,7 +172,14 @@ class PDFReport(FPDF):
                 self.image(therm_chart, x=(self.w-80)/2, w=80)
                 os.remove(therm_chart)
         self.ln(10)
-
+        
+        self.set_font('Courier', '', 10)
+        width = self.w - 2*self.l_margin
+        n_chars = int(width / self.get_string_width('='))
+        divider = '=' * n_chars
+        self.cell(0, 5, divider,
+                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.ln(5)
 
 
     def product_section(self, panel):
@@ -158,6 +187,16 @@ class PDFReport(FPDF):
         One page per panel: serial, model, timestamp, status,
         plus vision‐scan & thermal‐scan summaries and image.
         """
+        self.add_page()
+        if not self._first_panel:
+            self.set_font('Courier', '', 10)
+            width = self.w - 2*self.l_margin
+            n_chars = int(width / self.get_string_width('-'))
+            divider = '-' * n_chars
+            self.cell(0, 5, divider,
+                      new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.ln(2)
+        self._first_panel = False
         chart_id = str(uuid.uuid4())[:8]
 
         # — Panel Header —
@@ -306,8 +345,7 @@ class PDFReport(FPDF):
             self.multi_cell(0, 8, safe)
             self.ln(5)
 
-        # New page
-        self.add_page()
+       
 
 # ── Report Generation Entry Point ──────────────────────────────────────────────
 

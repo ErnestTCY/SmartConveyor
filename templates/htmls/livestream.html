@@ -9,6 +9,15 @@
     <h4>Conveyor Belt Camera</h4>
     <img src="{{ url_for('video_feed') }}" class="img-fluid border" alt="Livestream">
   </div>
+  <!-- MQTT Status -->
+  <div class="col-md-3 col-6">
+    <div class="card shadow border-start border-primary border-4">
+        <div class="card-body">
+            <h6><i class="fas fa-satellite-dish"></i> MQTT Status</h6>
+            <span id="mqtt-conn-status" class="badge bg-secondary">Checking...</span>
+        </div>
+    </div>
+</div>
 </div>
 
 <hr>
@@ -72,6 +81,21 @@
       }
     });
   }
+  function updateMQTTStatus() {
+    fetch('/api/mqtt_status')
+        .then(res => res.json())
+        .then(data => {
+            const el = document.getElementById('mqtt-conn-status');
+            if (data.status === 'ok') {
+                el.textContent = '🟢 Connected';
+                el.className = 'badge bg-success';
+            } else {
+                el.textContent = '🔴 Disconnected';
+                el.className = 'badge bg-danger';
+            }
+        });
+}
+setInterval(updateMQTTStatus, 3000);
 </script>
 
 
