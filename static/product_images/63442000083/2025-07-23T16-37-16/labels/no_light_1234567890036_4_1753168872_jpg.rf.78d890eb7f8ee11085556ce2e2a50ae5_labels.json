@@ -1,0 +1,43 @@
+{
+  "image_filename": "no_light_1234567890036_4_1753168872_jpg.rf.78d890eb7f8ee11085556ce2e2a50ae5.jpg",
+  "timestamp": "2025-07-25T09:13:43.392674",
+  "detections": [
+    {
+      "class": "solarboard",
+      "confidence": 0.87,
+      "position": {
+        "x": 3,
+        "y": 319
+      },
+      "size": {
+        "width": 230,
+        "height": 159
+      },
+      "bbox": [
+        3.5990447998046875,
+        319.71832275390625,
+        233.71282958984375,
+        479.42645263671875
+      ]
+    },
+    {
+      "class": "solarboard",
+      "confidence": 0.52,
+      "position": {
+        "x": 146,
+        "y": 29
+      },
+      "size": {
+        "width": 373,
+        "height": 448
+      },
+      "bbox": [
+        146.1025390625,
+        29.73394775390625,
+        519.3887939453125,
+        477.802978515625
+      ]
+    }
+  ],
+  "total_detections": 2
+}

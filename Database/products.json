@@ -3,11 +3,7 @@
     "serial_number": "1234567890036",
     "model_name": "SolarBoard Min456",
     "status_by_timestamp": {
-      "2025-06-29T15-20-46": "cracked",
-      "2025-07-14T15-54-47": "normal",
-      "2025-07-22T16-47-00": "normal",
       "2025-07-23T16-37-16": "normal",
-      "2025-07-23T17-23-14": "normal",
       "2025-07-24T11-06-46": "normal"
     },
     "thermal_by_timestamp": {
@@ -1426,13 +1422,10 @@
     "serial_number": "1234567890012",
     "model_name": "SolarBoard MAX30000",
     "status_by_timestamp": {
-      "2025-06-28T17-17-07": "normal",
       "2025-06-30T12-55-07": "normal",
-      "2025-07-14T17-17-07": "normal",
-      "2025-07-16T12-55-07": "normal",
       "2025-07-22T15-22-43": "normal",
       "2025-07-23T16-37-16": [
-        "normal"
+        "cracked"
       ]
     },
     "thermal_by_timestamp": {
@@ -2261,18 +2254,14 @@
         ]
       }
     },
-    "status": "normal"
+    "status": "crack"
   },
   {
     "serial_number": "1234567890005",
     "model_name": "SolarBoard MAX50000",
     "status_by_timestamp": {
       "2025-06-29T17-17-07": "normal",
-      "2025-06-30T12-55-07": "normal",
-      "2025-07-14T17-17-07": "normal",
-      "2025-07-16T11-28-49": "normal",
       "2025-07-22T16-17-03": "cracked",
-      "2025-07-23T16-37-16": "normal",
       "2025-07-23T17-12-37": [
         "normal"
       ],
@@ -4759,6 +4748,7 @@
           ]
         ]
       }
-    }
+    },
+    "status": "normal"
   }
 ]

@@ -1309,8 +1309,8 @@ def thermal_trends():
 @app.route('/generate_report', methods=['POST'])
 def generate_report_route():
     period = request.form.get('period')
+    print(f"🛠️  /generate_report called, period={period}")
     if period not in ('daily','weekly','monthly'):
-        flash('Please select a valid report period.', 'danger')
         return redirect(url_for('analytics'))
 
     # 2. Compute period bounds for display and reasoning
@@ -1324,16 +1324,49 @@ def generate_report_route():
     start_str = cutoff.strftime('%Y-%m-%d %H:%M:%S')
     end_str   = now.strftime('%Y-%m-%d %H:%M:%S')
 
-    # 3. Generate LLM reasoning about this period
-    prompt = f"""
-Report Period Analysis Summary
-Period Start: {start_str}
-Period End:   {end_str}
+    # 3. Pull every panel’s latest reasoning.json
+    products = load_products()
+    reasonings = []
+    for p in products:
+        serial = p.get('serial_number')
+        ts     = get_latest_timestamp_directory(serial)
+        if ts:
+            text = load_reasoning(serial, ts)
+            if text:
+                reasonings.append(f"Serial: {serial} (ts: {ts})\n{text}")
+    all_reasonings = "\n\n".join(reasonings)
 
-As an expert assistant, explain why choosing this period is valuable for inspection reporting, and what key insights the report will highlight based on status and thermal data within this timeframe. Generate in 2 paragraphs
+
+
+    # 4. Ask Gemini for a 2‑paragraph product details summary
+    summary_prompt = f"""
+Product Details Summary
+Below are the expert inspection reasonings for each panel at its most recent timestamp:
+{all_reasonings}
+
+As an expert assistant, generate a concise two‑paragraph summary of the product details, key findings, and overall insights.
 """
     model = genai.GenerativeModel('models/gemini-1.5-flash')
-    period_reasoning = model.generate_content(prompt).text.strip()
+    product_summary = model.generate_content(summary_prompt).text.strip()
+
+    reco_prompt = f"""
+Based on the following Product Details Summary:
+{product_summary}
+
+And the individual panel inspection reasonings:
+{all_reasonings}
+
+Please provide clear, actionable recommendations to:
+  1. Optimize the inspection process (e.g. detection thresholds, operator checks).
+  2. Adjust production parameters (e.g. lamination pressure, temperature, cooling rate).
+  3. Prevent future cracks and thermal defects.
+  4. Improve overall yield and quality control.
+
+Be as specific as possible—cite parameter ranges, procedural changes, or maintenance steps. Strictly Below 180 words.
+"""
+    recommendation_text = model.generate_content(reco_prompt).text.strip()
+
+    # 6. Generate the PDF (now passing summary + recommendation)
 
     # 4. Generate the PDF with additional period info
     try:
@@ -1342,7 +1375,8 @@ As an expert assistant, explain why choosing this period is valuable for inspect
             inspection_line='Smart Conveyor Automated System',
             inspector='Automated System',
             period_bounds=(start_str, end_str),
-            period_reasoning=period_reasoning
+            product_summary=product_summary,
+            recommendation=recommendation_text
         )
     except Exception as e:
         app.logger.error(f'Failed to generate PDF: {e}')

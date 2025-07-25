@@ -67,7 +67,6 @@ class PDFReport(FPDF):
         # existing stats...
         self.period_start = ''
         self.period_end = ''
-        self.period_reasoning = ''
         self._first_panel = True
 
     def header(self):
@@ -104,31 +103,17 @@ class PDFReport(FPDF):
         self.period_start = start
         self.period_end = end
 
-    def set_report_reasoning(self, reasoning: str):
-        self.period_reasoning = reasoning
 
  
 
     def cover_page(self, total_panels, inspection_line, inspector,
                    avg_crack_rate, avg_thermal_rate,
                    crack_pie_data=None, thermal_pie_data=None):
-        # existing cover content...
-        # After summary, insert period reasoning
-        if self.period_reasoning:
-            self.set_font('Helvetica', 'B', 12)
-            self.cell(0, 8, 'Period Reasoning', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            self.set_font('Helvetica', '', 11)
-            safe_text = self.period_reasoning.encode('latin-1', errors='replace').decode('latin-1')
-            self.multi_cell(0, 8, safe_text)
-            self.ln(5)
-        # continue with pie charts and suggestion...
-
-        """
-        Build the report cover with summary stats and small pie charts.
-        """
-        # Metadata
+       
+        # ── Metadata ────────────────────────────────
         self.set_font("Helvetica", '', 12)
-        self.cell(0, 10, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        self.cell(0, 10,
+                  f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.cell(0, 10, f"Inspection Line: {inspection_line}",
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -138,7 +123,7 @@ class PDFReport(FPDF):
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(5)
 
-        # Summary text
+        # ── Overall Summary ─────────────────────────
         self.set_font("Helvetica", 'B', 12)
         self.cell(0, 10, "Overall Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.set_font("Helvetica", '', 11)
@@ -148,15 +133,12 @@ class PDFReport(FPDF):
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(5)
 
-        # Pie charts
+        # ── Pie Charts ──────────────────────────────
         chart_id = str(uuid.uuid4())[:8]
-        # only draw if the total of the two slices is > 0 and both are real numbers
-        if (isinstance(crack_pie_data, (list,tuple)) 
-            and len(crack_pie_data)==2 
-            and all(isinstance(x,(int,float)) for x in crack_pie_data)
-            and sum(crack_pie_data)>0):
-
-
+        if (isinstance(crack_pie_data, (list, tuple)) and
+            len(crack_pie_data) == 2 and
+            all(isinstance(x, (int, float)) for x in crack_pie_data) and
+            sum(crack_pie_data) > 0):
             crack_chart = f"pie_crack_{chart_id}.png"
             generate_pie_chart(["Cracked", "Normal"], crack_pie_data,
                                "Crack Distribution", crack_chart)
@@ -172,7 +154,66 @@ class PDFReport(FPDF):
                 self.image(therm_chart, x=(self.w-80)/2, w=80)
                 os.remove(therm_chart)
         self.ln(10)
-        
+        # ── Product Details Summary ───────────────────
+        if getattr(self, 'product_summary', None):
+            self.set_font('Helvetica', 'B', 12)
+            self.cell(0, 8, 'Product Details Summary',
+                      new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.set_font('Helvetica', '', 11)
+            safe = self.product_summary.encode('latin-1', errors='replace').decode('latin-1')
+            self.multi_cell(0, 8, safe)
+            self.ln(5)
+
+        # ── Recommendation Box (fills to bottom margin) ───────────
+        if getattr(self, 'recommendation', None):
+            x = self.l_margin
+            y = self.get_y()
+            w = self.w - 2 * self.l_margin
+
+            # Prepare and wrap text exactly to inner box width (w - 4 mm)
+            self.set_font('Helvetica', '', 11)
+            safe_reco = self.recommendation.encode('latin-1', errors='replace').decode('latin-1')
+            max_text_width = w - 4
+            lines = []
+            for paragraph in safe_reco.split('\n'):
+                words, line = paragraph.split(' '), ''
+                for word in words:
+                    test = f"{line} {word}".strip()
+                    if self.get_string_width(test) <= max_text_width:
+                        line = test
+                    else:
+                        lines.append(line)
+                        line = word
+                if line:
+                    lines.append(line)
+            if safe_reco.endswith('\n'):
+                lines.append('')
+
+            # Compute box height: header + wrapped lines + padding
+            header_height = 6    # mm
+            text_height   = 6    # mm per wrapped line
+            padding_top   = 4    # mm
+            padding_bot   = 4    # mm
+            box_height = padding_top + header_height + len(lines) * text_height + padding_bot
+
+            # Draw green box
+            self.set_draw_color(0, 128, 0)
+            self.set_fill_color(212, 237, 218)
+            self.rect(x, y, w, box_height, style='DF')
+
+            # Write header + lines inside
+            self.set_xy(x + 2, y + padding_top)
+            self.set_font('Helvetica', 'B', 12)
+            self.cell(w - 4, header_height, 'Recommendation', ln=True, align='L')
+            self.set_font('Helvetica', '', 11)
+            for line in lines:
+                self.cell(w - 4, text_height, line, ln=True, align='L')
+
+            # Move cursor to just below the box
+            self.set_xy(self.l_margin, y + box_height + 2)
+
+
+        # ── Divider ─────────────────────────────────
         self.set_font('Courier', '', 10)
         width = self.w - 2*self.l_margin
         n_chars = int(width / self.get_string_width('='))
@@ -180,6 +221,9 @@ class PDFReport(FPDF):
         self.cell(0, 5, divider,
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(5)
+
+
+
 
 
     def product_section(self, panel):
@@ -345,7 +389,7 @@ class PDFReport(FPDF):
             self.multi_cell(0, 8, safe)
             self.ln(5)
 
-       
+    
 
 # ── Report Generation Entry Point ──────────────────────────────────────────────
 
@@ -353,7 +397,8 @@ def generate_report(period: str,
                     inspection_line='Line 1',
                     inspector='Automated System',
                     period_bounds=None,
-                    period_reasoning='') -> str:
+                    product_summary: str = '',
+                    recommendation: str   = '') -> str:
     now = datetime.now()
     if period == 'daily': cutoff = now - timedelta(days=1)
     elif period == 'weekly': cutoff = now - timedelta(weeks=1)
@@ -416,10 +461,13 @@ def generate_report(period: str,
     # 3) compute summary stats
     total_panels = len(filtered)
     total_scans  = sum(len(p["status_by_timestamp"]) for p in filtered)
-    total_cracked= sum(
-        1 for p in filtered for st in p["status_by_timestamp"].values()
-        if isinstance(st, str) and st.lower()=="cracked"
+    total_cracked = sum(
+        1 for p in filtered
+        for st in p["status_by_timestamp"].values()
+        if (isinstance(st, str) and st.lower() == "cracked")
+            or (isinstance(st, list) and any(s.lower() == "cracked" for s in st))
     )
+
     avg_crack_rate   = (total_cracked/total_scans*100) if total_scans else 0
 
     total_points= total_over = 0
@@ -441,8 +489,10 @@ def generate_report(period: str,
     pdf = PDFReport()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.set_period(start_str, end_str)
-    pdf.set_report_reasoning(period_reasoning)
+    pdf.product_summary = product_summary
+    pdf.recommendation  = recommendation
     pdf.add_page()
+   
 
     # grab one reasoning example
     pdf.cover_page(
