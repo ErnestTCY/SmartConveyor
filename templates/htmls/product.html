@@ -2,6 +2,34 @@
 {% block title %}Product Detail | T4G Dashboard{% endblock %}
 {% block content %}
 
+<style>
+    .timestamp-hover-wrapper {
+        position: relative;
+        display: block;
+    }
+    
+    .timestamp-hover-popup {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        z-index: 1000;
+        background-color: #f8f9fa;
+        border: 1px solid #ccc;
+        padding: 5px 10px;
+        font-size: 0.85rem;
+        color: #333;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        border-radius: 4px;
+        white-space: nowrap;
+    }
+    
+    .timestamp-hover-wrapper:hover .timestamp-hover-popup {
+        display: block;
+    }
+    </style>
+    
+
 <div class="container py-4">
     <h2 class="mb-4">🔍 Product Details</h2>
 
@@ -11,36 +39,38 @@
         <div class="col-md-5 mb-4">
             <h5>📸 Latest Images</h5>
             {% if product.images %}
-                <div id="imageCarousel" class="carousel slide mb-3" data-bs-ride="carousel">
-                    <div class="carousel-inner">
-                        {% for image in product.images %}
-                        <div class="carousel-item {% if loop.first %}active{% endif %}">
-                            <img src="{{ url_for('static', filename=image) }}" alt="Product Image"
-                                class="d-block w-100 rounded border" style="max-height: 300px; object-fit: contain;">
-                        </div>
-                        {% endfor %}
+            <div id="imageCarousel" class="carousel slide mb-3" data-bs-ride="carousel">
+                <div class="carousel-inner">
+                    {% for image in product.images %}
+                    <div class="carousel-item {% if loop.first %}active{% endif %}">
+                        <img src="{{ url_for('static', filename=image) }}" alt="Product Image"
+                            class="d-block w-100 rounded border" style="max-height: 300px; object-fit: contain;">
                     </div>
-                    {% if product.images|length > 1 %}
-                    <button class="carousel-control-prev" type="button" data-bs-target="#imageCarousel" data-bs-slide="prev">
-                        <span class="carousel-control-prev-icon" aria-hidden="true"></span>
-                        <span class="visually-hidden">Previous</span>
-                    </button>
-                    <button class="carousel-control-next" type="button" data-bs-target="#imageCarousel" data-bs-slide="next">
-                        <span class="carousel-control-next-icon" aria-hidden="true"></span>
-                        <span class="visually-hidden">Next</span>
-                    </button>
-                    {% endif %}
+                    {% endfor %}
                 </div>
-                <div class="text-center">
-                    <small class="text-muted">{{ product.images|length }} image(s) from latest timestamp</small>
-                </div>
+                {% if product.images|length > 1 %}
+                <button class="carousel-control-prev" type="button" data-bs-target="#imageCarousel"
+                    data-bs-slide="prev">
+                    <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                    <span class="visually-hidden">Previous</span>
+                </button>
+                <button class="carousel-control-next" type="button" data-bs-target="#imageCarousel"
+                    data-bs-slide="next">
+                    <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                    <span class="visually-hidden">Next</span>
+                </button>
+                {% endif %}
+            </div>
+            <div class="text-center">
+                <small class="text-muted">{{ product.images|length }} image(s) from latest timestamp</small>
+            </div>
             {% else %}
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle"></i> No images found for this product.
-                </div>
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i> No images found for this product.
+            </div>
             {% endif %}
 
-            <!-- Image History Section -->
+            <!-- ✅ Image History Section with working hover popup -->
             {% if product.image_history %}
             <div class="mt-4">
                 <h6>📚 Image History</h6>
@@ -48,19 +78,27 @@
                     {% for timestamp, images in product.image_history.items() %}
                     <div class="accordion-item">
                         <h2 class="accordion-header" id="heading{{ loop.index }}">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
-                                    data-bs-target="#collapse{{ loop.index }}" aria-expanded="false" aria-controls="collapse{{ loop.index }}">
-                                {{ timestamp }} ({{ images|length }} image(s))
-                            </button>
+                            <div class="timestamp-hover-wrapper">
+                                <button class="accordion-button collapsed w-100 text-start" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#collapse{{ loop.index }}"
+                                    aria-expanded="false" aria-controls="collapse{{ loop.index }}">
+                                    {{ timestamp }} ({{ images|length }} image(s))
+                                </button>
+                                <div class="timestamp-hover-popup">
+                                    Timestamp: {{ timestamp }}<br>
+                                    {{ images|length }} image(s)
+                                </div>
+                            </div>
                         </h2>
-                        <div id="collapse{{ loop.index }}" class="accordion-collapse collapse" aria-labelledby="heading{{ loop.index }}" 
-                             data-bs-parent="#imageHistoryAccordion">
+                        <div id="collapse{{ loop.index }}" class="accordion-collapse collapse"
+                            aria-labelledby="heading{{ loop.index }}" data-bs-parent="#imageHistoryAccordion">
                             <div class="accordion-body">
                                 <div class="row">
                                     {% for image in images %}
                                     <div class="col-md-6 mb-2">
                                         <img src="{{ url_for('static', filename=image) }}" alt="Historical Image"
-                                             class="img-fluid rounded border" style="max-height: 150px; object-fit: contain;">
+                                            class="img-fluid rounded border"
+                                            style="max-height: 150px; object-fit: contain;">
                                         <div class="text-center mt-1">
                                             <small class="text-muted">{{ image.split('/')[-1] }}</small>
                                         </div>
@@ -75,7 +113,7 @@
             </div>
             {% endif %}
 
-            <!-- Thermal History Section -->
+            <!-- ✅ Thermal History Section with working hover popup -->
             {% if product.thermal_history %}
             <div class="mt-4">
                 <h6>🌡️ Thermal History</h6>
@@ -83,19 +121,27 @@
                     {% for timestamp, images in product.thermal_history.items() %}
                     <div class="accordion-item">
                         <h2 class="accordion-header" id="thermalHeading{{ loop.index }}">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
-                                    data-bs-target="#thermalCollapse{{ loop.index }}" aria-expanded="false" aria-controls="thermalCollapse{{ loop.index }}">
-                                {{ timestamp }} ({{ images|length }} thermal image(s))
-                            </button>
+                            <div class="timestamp-hover-wrapper">
+                                <button class="accordion-button collapsed w-100 text-start" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#thermalCollapse{{ loop.index }}"
+                                    aria-expanded="false" aria-controls="thermalCollapse{{ loop.index }}">
+                                    {{ timestamp }} ({{ images|length }} thermal image(s))
+                                </button>
+                                <div class="timestamp-hover-popup">
+                                    Timestamp: {{ timestamp }}<br>
+                                    {{ images|length }} thermal image(s)
+                                </div>
+                            </div>
                         </h2>
-                        <div id="thermalCollapse{{ loop.index }}" class="accordion-collapse collapse" aria-labelledby="thermalHeading{{ loop.index }}" 
-                             data-bs-parent="#thermalHistoryAccordion">
+                        <div id="thermalCollapse{{ loop.index }}" class="accordion-collapse collapse"
+                            aria-labelledby="thermalHeading{{ loop.index }}" data-bs-parent="#thermalHistoryAccordion">
                             <div class="accordion-body">
                                 <div class="row">
                                     {% for image in images %}
                                     <div class="col-md-6 mb-2">
                                         <img src="{{ url_for('static', filename=image) }}" alt="Thermal Image"
-                                             class="img-fluid rounded border" style="max-height: 150px; object-fit: contain;">
+                                            class="img-fluid rounded border"
+                                            style="max-height: 150px; object-fit: contain;">
                                         <div class="text-center mt-1">
                                             <small class="text-muted">{{ image.split('/')[-1] }}</small>
                                         </div>
@@ -109,8 +155,8 @@
                 </div>
             </div>
             {% endif %}
-        </div>
 
+        </div>
         <!-- Form Section -->
         <div class="col-md-7">
             <form method="post" id="productForm">
@@ -141,13 +187,13 @@
                             {{ st }}
                         </span>
                         {% endfor %}
-                   
-                    {# Inline button, styled like a form button #}
-                    <button id="refreshStatusBtn" class="btn btn-outline-secondary btn-sm ms-3" type="button"
-                        title="Update status">
-                        🔄
-                    </button>
-                </div>
+
+                        {# Inline button, styled like a form button #}
+                        <button id="refreshStatusBtn" class="btn btn-outline-secondary btn-sm ms-3" type="button"
+                            title="Update status">
+                            🔄
+                        </button>
+                    </div>
 
                 </div>
 
@@ -168,14 +214,16 @@
                         <option value="{{ ts }}">{{ ts }}</option>
                         {% endfor %}
                     </select>
-                    <span id="statusDisplay" class="badge ms-2 {% if product.status_by_timestamp[product.image_history.keys()|list|first] == 'crack' %}bg-danger{% elif product.status_by_timestamp[product.image_history.keys()|list|first] == 'normal' %}bg-success{% else %}bg-warning{% endif %}">
+                    <span id="statusDisplay"
+                        class="badge ms-2 {% if product.status_by_timestamp[product.image_history.keys()|list|first] == 'crack' %}bg-danger{% elif product.status_by_timestamp[product.image_history.keys()|list|first] == 'normal' %}bg-success{% else %}bg-warning{% endif %}">
                         {{ product.status_by_timestamp[product.image_history.keys()|list|first] }}
                     </span>
                 </div>
                 <div id="reasoningBox" class="border rounded p-3 bg-light" style="min-height: 100px;">
                     <div id="reasoningText" style="white-space: pre-wrap;">Select a timestamp to view reasoning.</div>
                 </div>
-                <button id="generateReasoningBtn" class="btn btn-info btn-sm mt-2" style="display:none;">Generate Reasoning</button>
+                <button id="generateReasoningBtn" class="btn btn-info btn-sm mt-2" style="display:none;">Generate
+                    Reasoning</button>
                 <div id="reasoningSpinner" class="mt-2" style="display:none;">
                     <div class="spinner-border text-info" role="status"></div>
                     <span class="ms-2">Generating reasoning...</span>
@@ -264,8 +312,7 @@
             });
     }
 
-    document.getElementById('timestampSelect').addEventListener('change', function() {
-        fetchReasoningForTimestamp(this.value);
+    document.getElementById('timestampSelect').addEventListener('change', function () {
         updateStatusDisplay(this.value);
     });
     // On page load, fetch for the first timestamp if available
@@ -274,8 +321,8 @@
         fetchReasoningForTimestamp(tsSelect.value);
         updateStatusDisplay(tsSelect.value);
     }
-    // Generate reasoning button
-    document.getElementById('generateReasoningBtn').addEventListener('click', function() {
+        // Generate reasoning button
+        document.getElementById('generateReasoningBtn').addEventListener('click', function () {
         const ts = document.getElementById('timestampSelect').value;
         const spinner = document.getElementById('reasoningSpinner');
         const reasoningText = document.getElementById('reasoningText');
@@ -286,18 +333,56 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ timestamp: ts })
         })
-            .then(response => response.json())
-            .then(data => {
-                spinner.style.display = 'none';
-                reasoningText.textContent = data.reasoning || 'No reasoning available.';
-                // Optionally, refresh after generation
-                fetchReasoningForTimestamp(ts);
-            })
-            .catch(err => {
-                spinner.style.display = 'none';
-                reasoningText.textContent = 'Failed to generate reasoning.';
-            });
+        .then(response => response.json())
+        .then(data => {
+            spinner.style.display = 'none';
+            reasoningText.textContent = data.reasoning || 'No reasoning available.';
+            fetchReasoningForTimestamp(ts);
+        })
+        .catch(err => {
+            spinner.style.display = 'none';
+            reasoningText.textContent = 'Failed to generate reasoning.';
+        });
     });
+
+    document.querySelectorAll('.accordion-item').forEach(item => {
+    const button = item.querySelector('.accordion-button');
+    const collapseId = button.getAttribute('data-bs-target');
+    const collapseEl = document.querySelector(collapseId);
+
+    let hoverTimeout;
+
+    function openAccordion() {
+        if (button.classList.contains('collapsed')) {
+            button.click();
+        }
+    }
+
+    function closeAccordion() {
+        if (!button.classList.contains('collapsed')) {
+            button.click();
+        }
+    }
+
+    function isMouseInsideAccordion(e) {
+        return item.contains(e.relatedTarget);
+    }
+
+    item.addEventListener('mouseenter', () => {
+        clearTimeout(hoverTimeout);
+        openAccordion();
+    });
+
+    item.addEventListener('mouseleave', (e) => {
+        hoverTimeout = setTimeout(() => {
+            if (!isMouseInsideAccordion(e)) {
+                closeAccordion();
+            }
+        }, 150); // optional delay before closing
+    });
+});
+
+
 </script>
 
 {% endblock %}

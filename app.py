@@ -295,6 +295,9 @@ def process_all_images_in_timestamp(serial_number, timestamp_dir):
             
             # Extract filename from path
             image_filename = os.path.basename(image_path)
+            # Convert to list if needed (depends on ultralytics version)
+            if not isinstance(results, list):
+                results = [results]
             
             # Save labels
             label_path = save_yolo_labels(serial_number, timestamp_dir, image_filename, results)
@@ -509,7 +512,7 @@ def save_products(products):
 latest_frame = None
 async def receive_frames():
     global latest_frame
-    uri = "ws://10.10.13.45:8765"  # Replace with actual camera websocket URL
+    uri = "ws://192.168.12.236:8765"  # Replace with actual camera websocket URL
     try:
         async with websockets.connect(uri, max_size=None) as websocket:
             print("[INFO] Connected to camera stream...")
@@ -1067,97 +1070,131 @@ def upload_yolo_images():
     serial_number = str(data.get('serial_number', '')).strip()
     timestamp     = str(data.get('timestamp', '')).strip()
     images        = data.get('images', {})
-    model_name    = str(data.get('model_name', '')).strip()
+    model_name    = data.get('model_name', '').strip()
 
     if not serial_number or not timestamp or not images:
         return jsonify({'error': 'Missing serial_number, timestamp, or images'}), 400
 
-    # Base paths
+    # Prepare directories
     base_dir    = os.path.join('static', 'product_images', serial_number, timestamp)
     labels_dir  = os.path.join(base_dir, 'labels')
     thermal_dir = os.path.join(base_dir, 'thermal')
+    os.makedirs(base_dir, exist_ok=True)
     os.makedirs(labels_dir, exist_ok=True)
     os.makedirs(thermal_dir, exist_ok=True)
 
     saved = []
 
     for key, info in images.items():
-        fn  = info.get('filename')
-        b64 = info.get('data')
-        if not fn or not b64:
+        # ─── Skip any client‑side YOLO result ─────────────────────────
+        if key == 'yolo':
             continue
 
+        fn   = info.get('filename')
+        b64  = info.get('data')
+        if not fn or not b64:
+            continue
         raw = base64.b64decode(b64)
 
+        # ─── Thermal frames: unchanged ───────────────────────────────
         if key == 'thermal':
-            # (unchanged) save full‐grid JSON
             path = os.path.join(thermal_dir, fn)
             with open(path, 'wb') as f:
                 f.write(raw)
             grid = info.get('raw_grid')
             if grid:
+                # save accompanying JSON
                 loc = fn.split('_')[2]
                 with open(os.path.join(thermal_dir, f"area{loc}.json"), 'w') as jf:
                     json.dump({
                         'serial_number': serial_number,
                         'timestamp':     timestamp,
-                        'raw_grid':      grid
+                        'raw_grid':      grid,
                     }, jf, indent=2)
+            saved.append(path)
 
-        elif key == 'no_light':
-            # 1) save raw for detection
-            ts_path = os.path.join(base_dir, fn)
-            with open(ts_path, 'wb') as f:
+        # ─── Light / No‑light frames: save, detect, label, then stage no_light ─────────────────────────
+        elif key in ('light', 'no_light'):
+            # 1) save raw image into product_images for detection
+            path = os.path.join(base_dir, fn)
+            with open(path, 'wb') as f:
                 f.write(raw)
+            saved.append(path)
 
-            # 2) copy raw into new_images for self‑learn
-            new_dir = os.path.join('static', 'new_images')
-            os.makedirs(new_dir, exist_ok=True)
-            copy_path = os.path.join(new_dir, fn)
-            with open(copy_path, 'wb') as f:
-                f.write(raw)
-            saved.append(copy_path)
+            # 2) run YOLO on it and write JSON labels
+            try:
+                results = model.predict(source=path, conf=0.5, verbose=False)
+                save_yolo_labels(serial_number, timestamp, fn, results)
+            except Exception as e:
+                print(f"[YOLO ERROR] {fn}: {e}")
 
-            # 3) run YOLO detection on the timestamp image
-            results = model.predict(source=ts_path, conf=0.5, verbose=False)
+            # 3) if it's the no_light frame, copy the raw file into new_images/
+            if key == 'no_light':
+                new_dir = os.path.join('static', 'new_images')
+                os.makedirs(new_dir, exist_ok=True)
+                shutil.copy(path, os.path.join(new_dir, fn))
+                
+            elif key == 'light':
+                new_dir = os.path.join('static', 'new_images')
+                os.makedirs(new_dir, exist_ok=True)
+                shutil.copy(path, os.path.join(new_dir, fn))
 
-            # 4) save JSON labels
-            save_yolo_labels(serial_number, timestamp, fn, results)
-
-            # 5) overwrite timestamp image with annotated boxes
-            if results and results[0].boxes:
-                annotated = results[0].plot()   # draws boxes on the image
-                cv2.imwrite(ts_path, annotated)
-
+        # ─── Everything else (including any stray keys) is ignored ─────────────────────────
         else:
-            # ignore any 'yolo_*' or 'light' keys from the Pi
             continue
 
-    # update overall status & products.json
+    # ─── Update status based on all saved labels ─────────────────────────
     new_status = update_status_json(serial_number, timestamp)
 
+    # ─── Sync into products.json (unchanged) ─────────────────────────
     products = load_products()
     prod = next((p for p in products if p.get('serial_number') == serial_number), None)
     if not prod:
-        products.append({
-            'serial_number':       serial_number,
-            'model_name':          model_name or 'unknown yet',
-            'status':              new_status,
-            'status_by_timestamp': {timestamp: new_status}
-        })
+        prod = {
+            'serial_number':      serial_number,
+            'model_name':         model_name or 'unknown',
+            'status':             new_status,
+            'status_by_timestamp': {}
+        }
+        products.append(prod)
     else:
         if model_name:
             prod['model_name'] = model_name
         prod['status'] = new_status
-        prod.setdefault('status_by_timestamp', {})[timestamp] = new_status
 
+    prod.setdefault('status_by_timestamp', {})[timestamp] = new_status
     save_products(products)
 
     return jsonify({
         'success':      True,
         'saved_images': saved,
         'status':       new_status
-    })
+    }), 200
+
+
+@app.route('/upload_thermal_data/<serial_number>/<timestamp>', methods=['POST'])
+def upload_thermal_data(serial_number, timestamp):
+    try:
+        data = request.get_json()
+        files = data.get('files', {})
+
+        thermal_dir = os.path.join('static', 'product_images', serial_number, timestamp, 'thermal')
+        os.makedirs(thermal_dir, exist_ok=True)
+
+        for name, content in files.items():
+            path = os.path.join(thermal_dir, name)
+            if name.endswith('.json'):
+                with open(path, 'w') as f:
+                    json.dump(content, f, indent=2)
+                print(f"[THERMAL] Saved JSON: {name}")
+            else:
+                with open(path, 'wb') as f:
+                    f.write(base64.b64decode(content))
+                print(f"[THERMAL] Saved image: {name}")
+        return {"success": True, "saved": list(files.keys())}
+    except Exception as e:
+        logging.error(f"Failed to save thermal data: {e}")
+        return {"error": str(e)}, 500
 
 
 @app.route('/product/<serial_number>/refresh_status/<timestamp>', methods=['POST'])
@@ -1557,5 +1594,5 @@ if __name__ == "__main__":
     host_ip = socket.gethostbyname(socket.gethostname())
     port = 5000
     print(f"\n============================================\nServer running at: http://{host_ip}:{port}\n============================================\n")
-    app.run(host="0.0.0.0", port=port, debug=True) 
+    app.run(host="0.0.0.0", port=port, debug=False) 
 
