@@ -90,7 +90,7 @@ mkdir -p trained_models
 ### Start the Flask app
 
 ```bash
-flask run
+python app.py
 ```
 
 By default, the app listens on [http://127.0.0.1:5000/](http://127.0.0.1:5000/)
