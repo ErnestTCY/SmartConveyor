@@ -17,7 +17,7 @@ Smart Conveyor is a web-based dashboard and defect-detection system for solar-pa
 
 - **Live Inspection Feed**  
   Real-time video stream from conveyor-belt camera with MQTT-controlled robotic arm motors.  
-  ![Live Feed](/images/lLiveStream.png)
+  ![Live Feed](/images/LiveStream.png)
 
 - **Automated Defect Detection**  
   YOLOv8 segmentation runs on each frame to detect cracks and scratches. Results saved as JSON labels and annotated images.
