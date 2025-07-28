@@ -3,7 +3,10 @@
 <p align="center">
   <img src="images/hero.png" alt="Smart Conveyor System" width="70%" />
 </p>
-![Smart Conveyor](/images/SmartConveyor.gif)
+<p align="center">
+  <img src="images/SmartConveyor.gif" alt="Smart Conveyor demo" width="70%" />
+</p>
+
 
 # Smart Conveyor System
 
@@ -151,4 +154,3 @@ Please adhere to code style, write tests for new functionality, and update this 
 This project is licensed under the [MIT License](LICENSE).
 
 ---
-<p align="center">Built with ❤️ and YOLOv8</p>
