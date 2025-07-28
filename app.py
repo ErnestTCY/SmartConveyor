@@ -1075,35 +1075,39 @@ def upload_yolo_images():
     if not serial_number or not timestamp or not images:
         return jsonify({'error': 'Missing serial_number, timestamp, or images'}), 400
 
-    # Prepare directories
+    # ─── Prepare base dirs ─────────────────────────────────────────
     base_dir    = os.path.join('static', 'product_images', serial_number, timestamp)
     labels_dir  = os.path.join(base_dir, 'labels')
     thermal_dir = os.path.join(base_dir, 'thermal')
-    os.makedirs(base_dir, exist_ok=True)
-    os.makedirs(labels_dir, exist_ok=True)
+    os.makedirs(labels_dir,  exist_ok=True)
     os.makedirs(thermal_dir, exist_ok=True)
+    
+    # ─── Prepare per‑serial/timestamp new_images dir ───────────────
+    new_dir = os.path.join('static', 'new_images', serial_number, timestamp)
+    if os.path.exists(new_dir):
+        # optional: clear out any leftover files
+        for old in os.listdir(new_dir):
+            os.remove(os.path.join(new_dir, old))
+    os.makedirs(new_dir, exist_ok=True)
 
     saved = []
 
     for key, info in images.items():
-        # ─── Skip any client‑side YOLO result ─────────────────────────
         if key == 'yolo':
             continue
-
-        fn   = info.get('filename')
-        b64  = info.get('data')
+        fn  = info.get('filename')
+        b64 = info.get('data')
         if not fn or not b64:
             continue
         raw = base64.b64decode(b64)
 
-        # ─── Thermal frames: unchanged ───────────────────────────────
         if key == 'thermal':
+            # ─── leave thermals alone ─────────────────────────────
             path = os.path.join(thermal_dir, fn)
             with open(path, 'wb') as f:
                 f.write(raw)
             grid = info.get('raw_grid')
             if grid:
-                # save accompanying JSON
                 loc = fn.split('_')[2]
                 with open(os.path.join(thermal_dir, f"area{loc}.json"), 'w') as jf:
                     json.dump({
@@ -1113,42 +1117,42 @@ def upload_yolo_images():
                     }, jf, indent=2)
             saved.append(path)
 
-        # ─── Light / No‑light frames: save, detect, label, then stage no_light ─────────────────────────
         elif key in ('light', 'no_light'):
-            # 1) save raw image into product_images for detection
+            # ─── save raw for detection ────────────────────────────
             path = os.path.join(base_dir, fn)
             with open(path, 'wb') as f:
                 f.write(raw)
-            saved.append(path)
 
-            # 2) run YOLO on it and write JSON labels
+            # ─── run YOLO & save masked + JSON ────────────────────
             try:
                 results = model.predict(source=path, conf=0.5, verbose=False)
+                if not isinstance(results, list):
+                    results = [results]
                 save_yolo_labels(serial_number, timestamp, fn, results)
+                for res in results:
+                    annotated = res.plot()
+                    yfn = f"yolo_{fn}"
+                    ypath = os.path.join(base_dir, yfn)
+                    cv2.imwrite(ypath, annotated)
+                    saved.append(ypath)
             except Exception as e:
                 print(f"[YOLO ERROR] {fn}: {e}")
 
-            # 3) if it's the no_light frame, copy the raw file into new_images/
-            if key == 'no_light':
-                new_dir = os.path.join('static', 'new_images')
-                os.makedirs(new_dir, exist_ok=True)
-                shutil.copy(path, os.path.join(new_dir, fn))
-                
-            elif key == 'light':
-                new_dir = os.path.join('static', 'new_images')
-                os.makedirs(new_dir, exist_ok=True)
-                shutil.copy(path, os.path.join(new_dir, fn))
+            # ─── copy raw into its own namespaced new_images ────────
+            shutil.copy(path, os.path.join(new_dir, fn))
 
-        # ─── Everything else (including any stray keys) is ignored ─────────────────────────
-        else:
-            continue
+            # ─── delete the raw from product_images ────────────────
+            try:
+                os.remove(path)
+            except OSError as e:
+                print(f"[CLEANUP ERROR] Could not remove {path}: {e}")
 
-    # ─── Update status based on all saved labels ─────────────────────────
+        # else: ignore any other keys
+
+    # ─── update status & products.json (unchanged) ────────────────
     new_status = update_status_json(serial_number, timestamp)
-
-    # ─── Sync into products.json (unchanged) ─────────────────────────
-    products = load_products()
-    prod = next((p for p in products if p.get('serial_number') == serial_number), None)
+    products   = load_products()
+    prod = next((p for p in products if p['serial_number']==serial_number), None)
     if not prod:
         prod = {
             'serial_number':      serial_number,
@@ -1161,7 +1165,6 @@ def upload_yolo_images():
         if model_name:
             prod['model_name'] = model_name
         prod['status'] = new_status
-
     prod.setdefault('status_by_timestamp', {})[timestamp] = new_status
     save_products(products)
 
@@ -1170,6 +1173,7 @@ def upload_yolo_images():
         'saved_images': saved,
         'status':       new_status
     }), 200
+
 
 
 @app.route('/upload_thermal_data/<serial_number>/<timestamp>', methods=['POST'])

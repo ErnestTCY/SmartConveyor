@@ -1,0 +1,11 @@
+flask
+flask-socketio
+python-dotenv
+paho-mqtt
+ultralytics
+fpdf
+matplotlib
+numpy
+opencv-python
+pillow
+google-generativeai
