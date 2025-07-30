@@ -153,4 +153,6 @@ Please adhere to code style, write tests for new functionality, and update this 
 
 This project is licensed under the [MIT License](LICENSE).
 
----
+## Our Team
+ ![Team](/images/Team.png)
+ ---
